@@ -1,0 +1,62 @@
+{
+  "failOnParseError": true,
+  "rules": {
+    // Knip owns dead code and dependencies
+    "unused-files": "off",
+    "unused-exports": "off",
+    "unused-types": "off",
+    "unused-enum-members": "off",
+    "unused-class-members": "off",
+    "unused-dependencies": "off",
+    "unused-dev-dependencies": "off",
+    "unused-optional-dependencies": "off",
+    "unlisted-dependencies": "off",
+    "unresolved-imports": "off",
+    "duplicate-exports": "off",
+    "type-only-dependencies": "off",
+    "test-only-dependencies": "off",
+    "dev-dependencies-in-production": "off",
+    "unused-dependency-overrides": "off",
+    "misconfigured-dependency-overrides": "off",
+    "re-export-cycle": "error",
+  },
+  "health": {
+    // Off, because without coverage data fallow only guesses CRAP from export references
+    "maxCrap": 0,
+    "maxCognitive": 12,
+    "maxFileLines": 500,
+  },
+  "duplicates": {
+    // Zero means no limit, so a threshold just above it fails on any clone group
+    "threshold": 0.01,
+  },
+  "boundaries": {
+    // A file takes the first zone it matches
+    "zones": [
+      { "name": "cli", "patterns": ["src/kiln.cli.ts"] },
+      { "name": "dispatch", "patterns": ["src/dispatch/**"] },
+      { "name": "run", "patterns": ["src/run/**"] },
+      { "name": "vm", "patterns": ["src/vm/**"] },
+      { "name": "host", "patterns": ["src/host/**"] },
+      { "name": "config", "patterns": ["src/config/**"] },
+      { "name": "shared", "patterns": ["src/shared/**", "src/*.d.ts"] },
+      { "name": "lint", "patterns": ["lint/**"] },
+      { "name": "verify", "patterns": ["verify/**"] },
+    ],
+    "coverage": {
+      "requireAllFiles": true,
+      "allowUnmatched": ["*.config.ts", "*.config.mjs"],
+    },
+    "rules": [
+      { "from": "cli", "allow": ["dispatch", "run", "vm", "host", "shared"] },
+      { "from": "dispatch", "allow": ["run", "vm", "config", "shared"] },
+      { "from": "run", "allow": ["vm", "config", "shared"] },
+      { "from": "vm", "allow": ["config", "shared"] },
+      { "from": "host", "allow": ["config", "shared"] },
+      { "from": "config", "allow": ["shared"] },
+      { "from": "shared", "allow": [] },
+      { "from": "lint", "allow": [] },
+      { "from": "verify", "allow": ["cli", "dispatch", "run", "vm", "host", "config", "shared", "lint"] },
+    ],
+  },
+}

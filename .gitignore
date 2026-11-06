@@ -1,0 +1,10 @@
+node_modules
+dist
+.claude/
+.env
+.env.*
+*.tsbuildinfo
+*.tgz
+.DS_Store
+.cache/
+temp/

@@ -1,0 +1,58 @@
+output:
+  - failure
+  - execution_out
+
+# Check-only, since a hook that re-stages files sweeps in a concurrent session's edits
+pre-commit:
+  jobs:
+    - name: format
+      run: pnpm exec prettier --check --ignore-unknown {staged_files}
+
+pre-push:
+  jobs:
+    - name: secrets
+      run: gitleaks git --no-banner --redact
+    - name: gate
+      run: pnpm check
+
+check:
+  piped: true
+  jobs:
+    - name: types
+      run: tsc --noEmit
+    - name: verify
+      group:
+        parallel: true
+        jobs:
+          - name: format
+            run: prettier --check . --cache --log-level warn
+          - name: lint
+            run: pnpm lint
+          - name: unused
+            run: knip
+          - name: dupes
+            run: fallow dupes --quiet
+          # Health prints its report even when clean, so the output only shows on failure
+          - name: complexity
+            run: out=$(fallow health --complexity --quiet 2>&1) || { printf '%s\n' "$out"; exit 1; }
+          - name: architecture
+            run: fallow architecture --quiet
+          # Only dead-code reports stale or reasonless fallow suppressions
+          - name: suppressions
+            run: fallow dead-code --stale-suppressions --quiet
+          - name: test
+            run: pnpm test
+
+fix:
+  piped: true
+  jobs:
+    - name: autofix
+      group:
+        piped: true
+        jobs:
+          - name: format
+            run: prettier --write . --cache --list-different
+          - name: lint
+            run: oxlint --type-aware --fix --quiet || true
+    - name: report
+      run: pnpm check
