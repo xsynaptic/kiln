@@ -91,7 +91,7 @@ export function escalationDoubt(candidate: ReviewCandidate, gatekeeperLogin: str
 }
 
 export function reviewLaunchArgs(slot: string, prNumber: number, beadId: string | undefined): Array<string> {
-  const args = ["kiln", "review", slot, "--pr", String(prNumber), "--stamped"];
+  const args = ["review", slot, "--pr", String(prNumber), "--stamped"];
   if (beadId !== undefined) {
     args.push("--bead", beadId);
   }

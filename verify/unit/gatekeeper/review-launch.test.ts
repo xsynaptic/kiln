@@ -211,14 +211,7 @@ describe("escalationDoubt", () => {
 
 describe("reviewLaunchArgs", () => {
   it("tells the spawned run its ledger is already written", () => {
-    expect(reviewLaunchArgs("kiln-1", 361, undefined)).toStrictEqual([
-      "kiln",
-      "review",
-      "kiln-1",
-      "--pr",
-      "361",
-      "--stamped",
-    ]);
+    expect(reviewLaunchArgs("kiln-1", 361, undefined)).toStrictEqual(["review", "kiln-1", "--pr", "361", "--stamped"]);
   });
 
   it("carries the spec bead as review context when the PR has one", () => {

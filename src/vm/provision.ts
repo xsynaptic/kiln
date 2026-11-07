@@ -26,10 +26,6 @@ import {
   writeGuestFile,
 } from "./vm.ts";
 
-const cpuCount = 4;
-const memoryGib = 6;
-const diskGib = 60;
-
 interface Slot {
   block: PortBlock;
   profile: string;
@@ -86,7 +82,7 @@ async function provision(slot: Slot, repoRoot: string): Promise<void> {
   console.log(`writing the sandbox identity stub (guest ~/.claude/CLAUDE.md) and statusline`);
   writeGuestStub(slot, clonePath);
   writeGuestStatusline(slot);
-  syncGuestSkills(slot.profile);
+  syncGuestSkills(slot.profile, repoRoot);
   // After the skills sync, which replaces the whole folder
   stageGuestKit(slot.profile, clonePath);
 
@@ -137,8 +133,9 @@ async function copyEnvFiles(slot: Slot, repoRoot: string, clonePath: string): Pr
 
 function printSummary(slot: Slot, clonePath: string, toolchain: SlotToolchain): void {
   const { ports } = slot.block;
+  const { vm } = kilnConfig.slots;
   console.log(
-    `\nagent slot ready: ${slot.profile} (${String(cpuCount)} CPU / ${String(memoryGib)} GiB / ${String(diskGib)} G, vz)`,
+    `\nagent slot ready: ${slot.profile} (${String(vm.cpus)} CPU / ${String(vm.memoryGib)} GiB / ${String(vm.diskGib)} G, vz)`,
   );
   console.log(`  workspace: ${clonePath} (VM-local clone; origin = GitHub, host-ro = read-only host mount)`);
   console.log(`  boundary drill: passed`);
@@ -165,6 +162,7 @@ function safeDockerContext(): string | undefined {
 }
 
 function startVm(profile: string, repoRoot: string): void {
+  const { vm } = kilnConfig.slots;
   const contextBefore = safeDockerContext();
   try {
     runOrThrow(
@@ -174,11 +172,11 @@ function startVm(profile: string, repoRoot: string): void {
         "-p",
         profile,
         "--cpus",
-        String(cpuCount),
+        String(vm.cpus),
         "--memory",
-        String(memoryGib),
+        String(vm.memoryGib),
         "--disk",
-        String(diskGib),
+        String(vm.diskGib),
         "--vm-type",
         "vz",
         "--activate=false",
@@ -197,15 +195,17 @@ function startVm(profile: string, repoRoot: string): void {
   }
 }
 
-function syncGuestSkills(profile: string): void {
-  const configured = process.env.KILN_GUEST_SKILLS_DIR;
-  if (configured === undefined || configured.length === 0) {
-    console.log("no KILN_GUEST_SKILLS_DIR set; skipping guest skills");
+function syncGuestSkills(profile: string, repoRoot: string): void {
+  const configured = kilnConfig.guest.skillsDir;
+  if (configured === undefined) {
+    console.log("no guest.skillsDir in kiln.config.ts; skipping guest skills");
     return;
   }
-  const dir = configured.startsWith("~/") ? path.join(homedir(), configured.slice(2)) : configured;
+  const dir = configured.startsWith("~/")
+    ? path.join(homedir(), configured.slice(2))
+    : path.resolve(repoRoot, configured);
   if (!existsSync(dir)) {
-    throw new Error(`KILN_GUEST_SKILLS_DIR points at a missing folder: ${dir}`);
+    throw new Error(`guest.skillsDir points at a missing folder: ${dir}`);
   }
   sshScriptWithInput(
     profile,
@@ -247,8 +247,8 @@ function writeGuestStub(slot: Slot, clonePath: string): void {
       `additions in \`${kilnConfig.projectDoc}\` on \`github/main\` (\`git show github/main:<path>\`).`,
       "Together they win over interactive defaults.",
       "",
-      `The dev servers run on port block +${offset}000 (the root .env pins it): use the URLs`,
-      "the stack's own output names, never the documented defaults.",
+      `The dev servers run on port block +${offset}000: use the URLs the stack's own output`,
+      "names, never the documented defaults.",
       "",
     ].join("\n"),
   );

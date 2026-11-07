@@ -31,7 +31,12 @@ describe("kilnConfigSchema", () => {
   it("accepts a descriptor without guest or slot settings and defaults them", () => {
     const parsed = kilnConfigSchema.parse({ ...valid, slots: undefined });
     expect(parsed.guest).toEqual({ globalPackages: [], hostLinks: [], mcpServers: [] });
-    expect(parsed.slots).toEqual({ devPorts: {}, max: 8, resetVolumes: [] });
+    expect(parsed.slots).toEqual({
+      devPorts: {},
+      max: 8,
+      resetVolumes: [],
+      vm: { cpus: 4, diskGib: 60, memoryGib: 6 },
+    });
     expect(parsed.gates).toEqual({ author: "make check", env: {}, merge: "make ci", verdictFiles: {} });
   });
 
@@ -44,7 +49,11 @@ describe("kilnConfigSchema", () => {
   });
 
   it("defaults dispatch to Opus alone and holds the reviewer inside the allowlist", () => {
-    expect(kilnConfigSchema.parse(valid).dispatch).toEqual({ models: ["opus"], reviewModel: "opus" });
+    expect(kilnConfigSchema.parse(valid).dispatch).toEqual({
+      models: ["opus"],
+      reviewModel: "opus",
+      runCeilingMinutes: 360,
+    });
     const outside = { ...valid, dispatch: { models: ["sonnet"], reviewModel: "opus" } };
     expect(() => kilnConfigSchema.parse(outside)).toThrow(/reviewModel must be one of dispatch.models/);
     expect(() => kilnConfigSchema.parse({ ...valid, dispatch: { models: [] } })).toThrow();

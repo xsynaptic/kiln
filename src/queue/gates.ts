@@ -131,12 +131,12 @@ export function parkGates(beadsByGate: Map<string, Array<string>>): Array<ParkGa
 }
 
 // The claim stays because reconcile finds runs by assignee, so a run that delivers after the ceiling still gets its PR gate
-export function parkStalledRun(beadId: string, slot: string, ceilingHours: number, parkedIds: Set<string>): void {
-  const gateId = openHumanGate(beadId, `run past the ${String(ceilingHours)}h ceiling on ${slot}`);
+export function parkStalledRun(beadId: string, slot: string, ceilingMinutes: number, parkedIds: Set<string>): void {
+  const gateId = openHumanGate(beadId, `run past the ${String(ceilingMinutes)}-minute ceiling on ${slot}`);
   bd([
     "comment",
     beadId,
-    `${slot} has been busy with this run for over ${String(ceilingHours)}h, past the wall-clock ceiling; parked for a human look. The guest was left alone, so the run may yet deliver, and a PR it opens still gates this bead. Check the slot before unparking (${unparkHint(gateId)}): pnpm kiln attach ${slot}`,
+    `${slot} has been busy with this run for over ${String(ceilingMinutes)} minutes, past the wall-clock ceiling; parked for a human look. The guest was left alone, so the run may yet deliver, and a PR it opens still gates this bead. Check the slot before unparking (${unparkHint(gateId)}): pnpm kiln attach ${slot}`,
   ]);
   parkedIds.add(beadId);
 }

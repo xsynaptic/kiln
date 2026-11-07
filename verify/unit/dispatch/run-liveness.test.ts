@@ -7,13 +7,13 @@ describe("isPastRunCeiling", () => {
   const sixHoursLater = Date.parse("2026-08-06T06:00:00.000Z");
 
   it("trips only once the ceiling is actually past", () => {
-    expect(isPastRunCeiling(launchedAt, 6, sixHoursLater + 1)).toBe(true);
-    expect(isPastRunCeiling(launchedAt, 6, sixHoursLater)).toBe(false);
-    expect(isPastRunCeiling(launchedAt, 8, sixHoursLater + 1)).toBe(false);
+    expect(isPastRunCeiling(launchedAt, 360, sixHoursLater + 1)).toBe(true);
+    expect(isPastRunCeiling(launchedAt, 360, sixHoursLater)).toBe(false);
+    expect(isPastRunCeiling(launchedAt, 361, sixHoursLater + 1)).toBe(false);
   });
 
   it("never trips on an unreadable launch time", () => {
-    expect(isPastRunCeiling("", 6, sixHoursLater)).toBe(false);
-    expect(isPastRunCeiling("not a date", 6, sixHoursLater)).toBe(false);
+    expect(isPastRunCeiling("", 360, sixHoursLater)).toBe(false);
+    expect(isPastRunCeiling("not a date", 360, sixHoursLater)).toBe(false);
   });
 });

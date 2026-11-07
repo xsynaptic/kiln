@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { closeSync, openSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -12,6 +11,7 @@ import { kilnConfig } from "../config/config.ts";
 import { bd, bdComments, claimNextReady, releaseSlotClaim, unclaimFromSlot } from "../queue/bd-client.ts";
 import { typeFromTitle } from "../run/branches.ts";
 import { knownSlugs } from "../run/signals.ts";
+import { spawnKiln } from "../shared/kiln-cli.ts";
 import { agentRunsPath, ensureDir, timestampSlug } from "../shared/run-artifacts.ts";
 import { provisionSlotLogged } from "../vm/provision-logged.ts";
 import { didCloseLandedPr, landingOf } from "./gate-pass.ts";
@@ -136,7 +136,6 @@ async function dispatchToSlot(
   ensureDir(path.dirname(briefPath));
   writeFileSync(briefPath, brief);
   const runArgs = [
-    "kiln",
     "run",
     slot.name,
     "--brief",
@@ -167,7 +166,7 @@ function launchDetached(repoRoot: string, beadId: string, runArgs: Array<string>
   ensureDir(agentRunsPath(repoRoot, "launches"));
   const logPath = agentRunsPath(repoRoot, "launches", `${beadId}-${timestampSlug()}.log`);
   const fd = openSync(logPath, "a");
-  const child = spawn("pnpm", runArgs, {
+  const child = spawnKiln(runArgs, {
     cwd: repoRoot,
     detached: true,
     stdio: ["ignore", fd, fd],

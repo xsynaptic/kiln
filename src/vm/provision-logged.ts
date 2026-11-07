@@ -1,6 +1,6 @@
-import { spawn } from "node:child_process";
 import { closeSync, openSync, readFileSync } from "node:fs";
 
+import { spawnKiln } from "../shared/kiln-cli.ts";
 import { agentRunsPath, ensureDir, timestampSlug } from "../shared/run-artifacts.ts";
 
 const failureTailLines = 15;
@@ -15,7 +15,7 @@ export async function provisionSlotLogged(repoRoot: string, slotName: string): P
   let exitCode: null | number;
   try {
     exitCode = await new Promise<null | number>((resolve, reject) => {
-      const child = spawn("pnpm", ["--silent", "kiln", "new", slotName], {
+      const child = spawnKiln(["new", slotName], {
         cwd: repoRoot,
         stdio: ["ignore", fd, fd],
       });

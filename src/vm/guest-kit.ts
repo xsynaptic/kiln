@@ -14,6 +14,7 @@ const placeholderValues: Readonly<Record<string, string>> = {
   "gates.merge": kilnConfig.gates.merge,
   githubRepo: kilnConfig.identity.githubRepo,
   projectDoc: kilnConfig.projectDoc,
+  "slots.vm.memoryGib": String(kilnConfig.slots.vm.memoryGib),
 };
 
 export function guestModesDir(clonePath: string): string {

@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { closeSync, existsSync, openSync } from "node:fs";
 import path from "node:path";
 
@@ -17,6 +16,7 @@ import {
   stampReviewLaunch,
 } from "../gatekeeper/review-ledger.ts";
 import { gateBlockedBeads, parkBehindGate } from "../queue/gates.ts";
+import { spawnKiln } from "../shared/kiln-cli.ts";
 import { agentRunsPath, ensureDir, timestampSlug } from "../shared/run-artifacts.ts";
 import { provisionSlotLogged } from "../vm/provision-logged.ts";
 import { hasReceiptSince } from "./run-ledger.ts";
@@ -56,7 +56,7 @@ export interface ReviewPlan {
 
 interface StalledReviewScan {
   busyByName: Map<string, boolean>;
-  ceilingHours: number;
+  ceilingMinutes: number;
   isDryRun: boolean;
   receipts: Array<RunReceipt>;
   repoRoot: string;
@@ -153,7 +153,7 @@ export function planReviews(
 }
 
 export function releaseStalledReviews(scan: StalledReviewScan, launchLogs: Array<string>): number {
-  const { busyByName, ceilingHours, isDryRun, receipts, repoRoot } = scan;
+  const { busyByName, ceilingMinutes, isDryRun, receipts, repoRoot } = scan;
   let stalled = 0;
   for (const fileName of launchLogs) {
     const prNumber = reviewMarkerPrNumber(fileName);
@@ -165,13 +165,13 @@ export function releaseStalledReviews(scan: StalledReviewScan, launchLogs: Array
       marker === undefined ||
       busyByName.get(marker.slot) !== true ||
       hasReceiptSince(receipts, marker.slot, marker.launchedAt) ||
-      !isPastRunCeiling(marker.launchedAt, ceilingHours, Date.now())
+      !isPastRunCeiling(marker.launchedAt, ceilingMinutes, Date.now())
     ) {
       continue;
     }
     stalled += 1;
     console.warn(
-      `reconcile: ${marker.slot} has been busy reviewing PR #${String(prNumber)} for over ${String(ceilingHours)}h; released its marker so the review can run elsewhere, and left the guest alone`,
+      `reconcile: ${marker.slot} has been busy reviewing PR #${String(prNumber)} for over ${String(ceilingMinutes)} minutes; released its marker so the review can run elsewhere, and left the guest alone`,
     );
     if (!isDryRun) {
       deleteReviewMarker(repoRoot, prNumber);
@@ -271,7 +271,7 @@ function launchReviewDetached(repoRoot: string, slot: string, prNumber: number, 
   ensureDir(agentRunsPath(repoRoot, "launches"));
   const logPath = agentRunsPath(repoRoot, "launches", `review-pr-${String(prNumber)}-${timestampSlug()}.log`);
   const fd = openSync(logPath, "a");
-  const child = spawn("pnpm", reviewLaunchArgs(slot, prNumber, beadId), {
+  const child = spawnKiln(reviewLaunchArgs(slot, prNumber, beadId), {
     cwd: repoRoot,
     detached: true,
     stdio: ["ignore", fd, fd],

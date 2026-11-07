@@ -1,10 +1,10 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import process from "node:process";
 
 import type { BeadComment } from "../queue/bd-client.ts";
 import type { RunReceipt } from "../run/receipts.ts";
 import type { CrankState } from "./crank-state.ts";
 
+import { kilnConfig } from "../config/config.ts";
 import { unclosedPrUrlsForBead, unclosedPrUrlsForHead } from "../gatekeeper/pr-views.ts";
 import {
   bd,
@@ -22,7 +22,6 @@ import { latestDispatchBranch, latestDispatchTime, spentAttempts } from "./run-a
 import { deliveredPrUrl, latestReceiptForBead, parseReceipts, strandedPrUrl } from "./run-ledger.ts";
 import { isPastRunCeiling, launchGraceMinutes } from "./run-liveness.ts";
 
-const defaultRunCeilingHours = 6;
 const maxRunAttempts = 2;
 
 type PendingOutcome =
@@ -40,7 +39,7 @@ interface CrankWrites {
 
 interface ReconcileContext extends CrankWrites {
   busyByName: Map<string, boolean>;
-  ceilingHours: number;
+  ceilingMinutes: number;
   isQuiet: boolean;
   receipts: Array<RunReceipt>;
   repoRoot: string;
@@ -88,7 +87,7 @@ export function reconcile(crankState: CrankState): number {
   const { flags, isQuiet, parkedIds, receipts, repoRoot, slots } = crankState;
   const context: ReconcileContext = {
     busyByName: new Map(slots.map((slot) => [slot.name, slot.busy])),
-    ceilingHours: runCeilingHours(),
+    ceilingMinutes: kilnConfig.dispatch.runCeilingMinutes,
     isDryRun: flags.isDryRun,
     isQuiet,
     parkedIds,
@@ -124,18 +123,18 @@ function claimTime(marks: Array<string | undefined>, startedAt: string): string 
 function didReportRunPastCeiling(
   pending: PendingRun,
   launchedAt: string,
-  ceilingHours: number,
+  ceilingMinutes: number,
   writes: CrankWrites,
 ): boolean {
   const { isDryRun, parkedIds } = writes;
-  if (parkedIds.has(pending.id) || !isPastRunCeiling(launchedAt, ceilingHours, Date.now())) {
+  if (parkedIds.has(pending.id) || !isPastRunCeiling(launchedAt, ceilingMinutes, Date.now())) {
     return false;
   }
   console.warn(
-    `reconcile: ${pending.slot} has been busy with ${pending.id} for over ${String(ceilingHours)}h; parking the bead and leaving the guest alone`,
+    `reconcile: ${pending.slot} has been busy with ${pending.id} for over ${String(ceilingMinutes)} minutes; parking the bead and leaving the guest alone`,
   );
   if (!isDryRun) {
-    parkStalledRun(pending.id, pending.slot, ceilingHours, parkedIds);
+    parkStalledRun(pending.id, pending.slot, ceilingMinutes, parkedIds);
   }
   return true;
 }
@@ -206,12 +205,6 @@ function releaseStaleClaim(pending: PendingRun, isDryRun: boolean): void {
   }
 }
 
-function runCeilingHours(): number {
-  const raw = process.env.KILN_RUN_CEILING_HOURS;
-  const value = raw === undefined ? defaultRunCeilingHours : Number(raw);
-  return Number.isFinite(value) && value > 0 ? value : defaultRunCeilingHours;
-}
-
 function settleDeadRun(pending: PendingRun, reason: string, canRetry: boolean, writes: CrankWrites): void {
   console.log(`reconcile: ${pending.id} ${reason}; ${canRetry ? "requeued" : "parked"}`);
   if (writes.isDryRun) {
@@ -232,7 +225,7 @@ function settlePendingRun(pending: PendingRun, context: ReconcileContext): Pendi
   const comments = bdComments(pending.id);
   const launchedAt = claimTime([latestDispatchTime(comments), latestPrGateOn(pending.id)], shown.startedAt);
   if (context.busyByName.get(pending.slot) === true) {
-    return didReportRunPastCeiling(pending, launchedAt, context.ceilingHours, context) ? "stalled" : "settled";
+    return didReportRunPastCeiling(pending, launchedAt, context.ceilingMinutes, context) ? "stalled" : "settled";
   }
   settleIdleSlotRun(pending, { comments, launchedAt, status: shown.status }, context);
   return "settled";

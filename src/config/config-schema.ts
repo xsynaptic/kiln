@@ -19,6 +19,7 @@ const dispatchSchema = z
   .object({
     models: z.tuple([modelSchema], modelSchema).default(["opus"]),
     reviewModel: modelSchema.default("opus"),
+    runCeilingMinutes: z.number().int().positive().default(360),
   })
   .refine((dispatch) => dispatch.models.includes(dispatch.reviewModel), {
     message: "dispatch.reviewModel must be one of dispatch.models",
@@ -73,6 +74,13 @@ const guestSchema = z.object({
   mcpServers: z.array(mcpServerSchema).default([]),
   pins: pinsSchema.optional(),
   playwrightPackage: shellWord(/^[\w@.][\w@/.-]*$/).optional(),
+  skillsDir: z.string().min(1).optional(),
+});
+
+const vmSchema = z.object({
+  cpus: z.number().int().min(1).default(4),
+  diskGib: z.number().int().min(1).default(60),
+  memoryGib: z.number().int().min(1).default(6),
 });
 
 const slotsSchema = z
@@ -81,6 +89,7 @@ const slotsSchema = z
     devPorts: z.record(envKeySchema, z.number().int().min(1).max(24_575)).default({}),
     max: z.number().int().min(1).max(8).default(8),
     resetVolumes: z.array(shellWord(/^[a-z0-9][\w.-]*$/i)).default([]),
+    vm: vmSchema.prefault({}),
   })
   .refine(
     (slots) =>
