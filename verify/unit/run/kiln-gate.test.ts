@@ -1,5 +1,15 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -274,6 +284,19 @@ describe("the kiln-gate script in a clone", () => {
     mkdirSync(path.join(box.repo, ".git", "kiln-gate"));
     writeFileSync(path.join(box.repo, ".git", "kiln-gate", "lock"), JSON.stringify({ name: "author", pid: gone.pid }));
     expect(kilnGate(box, ["author"]).status).toBe(0);
+  });
+
+  it("takes over a stale lock whose takeover was abandoned by a killed gate, and clears the takeover", () => {
+    const box = sandbox();
+    const dir = path.join(box.repo, ".git", "kiln-gate");
+    const gone = spawnSync("true");
+    const lock = JSON.stringify({ name: "author", pid: gone.pid });
+    const claim = `lock.${createHash("sha256").update(lock).digest("hex").slice(0, 16)}`;
+    mkdirSync(dir);
+    writeFileSync(path.join(dir, "lock"), lock);
+    writeFileSync(path.join(dir, claim), JSON.stringify({ name: "claim", pid: gone.pid }));
+    expect(kilnGate(box, ["author"]).status).toBe(0);
+    expect(readdirSync(dir).filter((file) => file.startsWith("lock"))).toEqual([]);
   });
 
   it("never signals a group that a dead holder's lock names once another process holds that id", async () => {

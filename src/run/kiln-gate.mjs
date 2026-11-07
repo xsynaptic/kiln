@@ -163,22 +163,45 @@ function createLock(lockPath, name) {
   return true;
 }
 
-function removeStaleLock(lockPath, raw) {
-  const claim = `${lockPath}.${createHash("sha256").update(raw).digest("hex").slice(0, 16)}`;
-  try {
-    closeSync(openSync(claim, "wx"));
-  } catch (error) {
-    if (error.code === "EEXIST") {
-      return;
-    }
-    throw error;
+function abandonedClaim(claim) {
+  const raw = readOptional(claim);
+  if (raw === undefined) {
+    return;
   }
+  const claimer = parseJson(raw);
+  if (claimer === undefined || isAlive(claimer?.pid)) {
+    return;
+  }
+  return raw;
+}
+
+function clearUnderClaims(lockPath, raw, claims) {
   try {
     if (readOptional(lockPath) === raw) {
       rmSync(lockPath, { force: true });
     }
   } finally {
-    rmSync(claim, { force: true });
+    for (const claim of claims) {
+      rmSync(claim, { force: true });
+    }
+  }
+}
+
+function removeStaleLock(lockPath, raw) {
+  const deadClaims = [];
+  let chain = raw;
+  for (;;) {
+    const claim = `${lockPath}.${createHash("sha256").update(chain).digest("hex").slice(0, 16)}`;
+    if (createLock(claim, "claim")) {
+      clearUnderClaims(lockPath, raw, [...deadClaims, claim]);
+      return;
+    }
+    const claimRaw = abandonedClaim(claim);
+    if (claimRaw === undefined) {
+      return;
+    }
+    deadClaims.push(claim);
+    chain += `\n${claimRaw}`;
   }
 }
 
