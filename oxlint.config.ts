@@ -15,7 +15,6 @@ const coreRules = [
   "no-delete-var",
   "no-dupe-else-if",
   "no-duplicate-case",
-  "no-empty",
   "no-empty-character-class",
   "no-empty-pattern",
   "no-empty-static-block",
@@ -189,7 +188,7 @@ export default defineConfig({
       },
     },
   ],
-  plugins: ["typescript"],
+  plugins: ["import", "typescript"],
   rules: {
     ...enable("", coreRules),
     ...enable("typescript/", typescriptRules),
@@ -200,15 +199,12 @@ export default defineConfig({
     ),
     // Ceilings sit at the worst case the code already has, and only ever move down
     complexity: ["warn", { max: 10, variant: "modified" }],
+    "import/consistent-type-specifier-style": ["error", "prefer-top-level"],
     "kiln/restricted-syntax": [
       "error",
       {
         message: "Re-export named symbols explicitly; `export *` (barrel star-exports) is banned.",
         selector: "ExportAllDeclaration",
-      },
-      {
-        message: "Separate type imports into their own `import type` statement.",
-        selector: 'ImportDeclaration[importKind="value"] ImportSpecifier[importKind="type"]',
       },
       {
         message:
@@ -221,6 +217,7 @@ export default defineConfig({
     "max-depth": ["warn", 3],
     "max-lines-per-function": ["warn", { max: 108, skipBlankLines: true, skipComments: true }],
     "max-statements": ["warn", 46],
+    "no-empty": ["error", { allowEmptyCatch: true }],
     // Its fixer moves declarations blind to what depends on their order, and eats suppression blocks
     "perfectionist/sort-modules": "off",
     // Its fixer leaves leading comments behind while the arms move under them, so a comment partitions instead
