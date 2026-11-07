@@ -25,6 +25,7 @@ export type ReceiptExtras = {
       | "kit"
       | "model"
       | "nudge"
+      | "outcome"
       | "prUrl"
       | "review"
       | "signals"

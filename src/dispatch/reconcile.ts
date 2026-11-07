@@ -299,6 +299,18 @@ function settleUndeliveredRun(pending: PendingRun, receipt: RunReceipt, canRetry
     }
     return;
   }
+  if (receipt.outcome?.kind === "no-change") {
+    console.log(`reconcile: ${pending.id} needs no change, per its run; parked`);
+    if (!isDryRun) {
+      parkBead(
+        pending.id,
+        pending.slot,
+        `run found nothing to change: ${receipt.outcome.reason} (${receipt.transcriptDir})`,
+        parkedIds,
+      );
+    }
+    return;
+  }
   settleDeadRun(
     pending,
     `run delivered nothing (${receipt.stopReason}, no commits, ${receipt.transcriptDir})`,

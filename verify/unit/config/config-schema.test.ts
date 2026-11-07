@@ -86,6 +86,14 @@ describe("kilnConfigSchema", () => {
     expect(() => kilnConfigSchema.parse({ ...valid, projectDoc: "agents.md; rm -rf ~" })).toThrow();
   });
 
+  it("takes clone-relative playbooks, each optional, and rejects absolute or shell-unsafe ones", () => {
+    expect(kilnConfigSchema.parse(valid).playbooks).toEqual({});
+    const worker = { ...valid, playbooks: { worker: "docs/kiln/worker.md" } };
+    expect(kilnConfigSchema.parse(worker).playbooks).toEqual({ worker: "docs/kiln/worker.md" });
+    expect(() => kilnConfigSchema.parse({ ...valid, playbooks: { session: "/etc/passwd" } })).toThrow();
+    expect(() => kilnConfigSchema.parse({ ...valid, playbooks: { gatekeeper: "a.md; rm -rf ~" } })).toThrow();
+  });
+
   it("rejects a host link that would break out of its guest shell line or read as a flag", () => {
     for (const link of ["data; rm -rf ~", "-", "-rf"]) {
       expect(() => kilnConfigSchema.parse({ ...valid, guest: { hostLinks: [link] } })).toThrow();

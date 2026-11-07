@@ -171,28 +171,6 @@ const detachedRunActions = [
       },
     ),
   ),
-  slot.map((name) =>
-    action(
-      `TheRunFindsNothingToChange(${name})`,
-      (world) => isHoldingItsBead(world, name, "detached"),
-      (world) => {
-        const id = sessionBead(world, name);
-        world.bd.run([
-          "gate",
-          "create",
-          "--type=human",
-          "--blocks",
-          id,
-          "--reason",
-          "nothing to change",
-          "--actor",
-          name,
-        ]);
-        world.bd.run(["unclaim", id, "--actor", name]);
-        endRun(world, name, "nothing");
-      },
-    ),
-  ),
 ];
 
 const sessionActions = [

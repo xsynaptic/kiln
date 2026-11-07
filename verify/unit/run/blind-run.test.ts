@@ -26,7 +26,7 @@ function promptReachingGuestClaude(prompt: string): string {
 describe("guestClaudeCommand", () => {
   it("hands the prompt to the guest verbatim, backticks and quotes included", () => {
     const prompt =
-      "Your operating manual is /mnt/work/kiln/modes/gatekeeper.md; read docs/agents.md on `github/main`, " +
+      "Your contract is /mnt/work/kiln/contracts/gatekeeper.md; read docs/agents.md on `github/main`, " +
       'which you read with `git show github/main:<path>`, as you do the "policy" files it links.';
     expect(promptReachingGuestClaude(prompt)).toBe(prompt);
   });

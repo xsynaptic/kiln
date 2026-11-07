@@ -3,13 +3,14 @@
 \* Models src/queue/bd-client.ts
 \* Models src/dispatch/bead-launch.ts
 \* Models src/dispatch/reconcile.ts
+\* Models src/run/receipts.ts
 \* Models src/queue/gates.ts
 \* Models src/dispatch/gate-pass.ts
 \* Models src/dispatch/dispatch.ts
 \* Models src/dispatch/run-attempts.ts
 \* Models src/gatekeeper/pr-views.ts
-\* Models modes/detached.md
-\* Models modes/attended.md
+\* Models contracts/detached.md
+\* Models contracts/attended.md
 \* Sync commit none; confirmed against the uncommitted tree of 2026-11-07
 EXTENDS Naturals
 
@@ -28,7 +29,7 @@ vars == <<status, holder, prGate, parks, pr, needsHuman, run, launches, sessionP
 \* run: the slot's run for this bead, "idle" once reconcile has read it or it never started
 \* "session" is an attended session, which claims, gates and releases the bead itself; sessionPr: it opened a PR
 \* free: the bead's provider deaths (failed:api_error, no commits); aborts: its signalled: stops; sinceHuman: launches since a human last acted on it
-Outcomes == {"delivered", "diedWithPr", "committed", "nothing", "noReceipt", "apiError", "aborted"}
+Outcomes == {"delivered", "diedWithPr", "committed", "noChange", "nothing", "noReceipt", "apiError", "aborted"}
 
 \* An abort is a human's, so no run ends that way on its own
 RunOutcomes == Outcomes \ {"aborted"}
@@ -139,16 +140,6 @@ AHumanAbortsTheRun ==
     /\ sinceHuman' = 0
     /\ UNCHANGED <<sessionPr, free, status, holder, prGate, parks, pr, needsHuman, launches>>
 
-\* detached.md: a run that finds nothing to change parks its own bead and unclaims it
-TheRunFindsNothingToChange ==
-    /\ run = "running"
-    /\ holder = "slot"
-    /\ run' = "idle"
-    /\ parks' = parks + 1
-    /\ status' = ParkedStatus
-    /\ holder' = "none"
-    /\ UNCHANGED <<sessionPr, free, aborts, sinceHuman, prGate, pr, needsHuman, launches>>
-
 \* didReportRunPastCeiling: parkStalledRun keeps the claim and leaves the guest running
 ReconcileParksAStalledRun ==
     /\ run \in {"running", "session"}
@@ -183,6 +174,8 @@ ReconcileReadsTheReceipt ==
          [] run = "diedWithPr" ->
                 ParkBead /\ prGate' = IF DeliveryOpensPrGate THEN "open" ELSE prGate
          [] run = "committed" ->
+                ParkBead /\ UNCHANGED prGate
+         [] run = "noChange" ->
                 ParkBead /\ UNCHANGED prGate
          [] run = "noReceipt" /\ DeadRunHoldsAPr ->
                 ParkBead /\ prGate' = "open"
@@ -376,7 +369,6 @@ Next ==
     \/ TheLaunchFails
     \/ \E outcome \in RunOutcomes : TheRunEnds(outcome)
     \/ AHumanAbortsTheRun
-    \/ TheRunFindsNothingToChange
     \/ ReconcileParksAStalledRun
     \/ ReconcileReadsTheReceipt
     \/ SomeoneReopensAClaimedBead

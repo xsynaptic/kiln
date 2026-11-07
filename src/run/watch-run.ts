@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import type { ResultMetrics, ReviewDecision, RunSignal } from "./receipts.ts";
+import type { ReviewDecision, RunOutcome, RunSignal } from "./receipts.ts";
 import type { WatchFlags } from "./run-args.ts";
+import type { ResultMetrics } from "./run-stream.ts";
 
 import { agentRunsPath, agentRunsRoot, ensureDir, mainCheckoutPath, timestampSlug } from "../shared/run-artifacts.ts";
 import { acquireLease } from "../vm/lease.ts";
@@ -17,15 +18,8 @@ import {
 import { currentBranch } from "./clone-baseline.ts";
 import { awaitGuestMarker } from "./guest-wait.ts";
 import { readTokens } from "./launch-run.ts";
-import {
-  attendedStopReason,
-  lastResultSubtype,
-  lastResultTerminalReason,
-  resultMetrics,
-  runModel,
-  runOutput,
-  stopReasonFor,
-} from "./receipts.ts";
+import { attendedStopReason, runOutput, stopReasonFor } from "./receipts.ts";
+import { lastResultSubtype, lastResultTerminalReason, resultMetrics, runModel } from "./run-stream.ts";
 import { finishReceipt, prUrlForBranch, rescueSessionTranscript, scrubFile } from "./run-tail.ts";
 import { nudgeRecord } from "./wrapup-nudge.ts";
 
@@ -46,6 +40,7 @@ interface StreamReading {
   decision: ReviewDecision | undefined;
   metrics: ResultMetrics;
   model: string | undefined;
+  outcome: RunOutcome | undefined;
   prUrl: string | undefined;
   signals: Array<RunSignal> | undefined;
   stopReason: string;
@@ -101,16 +96,18 @@ function streamReading(stream: string | undefined, markerExit: number | undefine
       decision: undefined,
       metrics: {},
       model: undefined,
+      outcome: undefined,
       prUrl: undefined,
       signals: undefined,
       stopReason: attendedStopReason(markerExit, undefined),
     };
   }
-  const { decision, prUrl, signals } = runOutput(stream);
+  const { decision, outcome, prUrl, signals } = runOutput(stream);
   return {
     decision,
     metrics: resultMetrics(stream),
     model: runModel(stream),
+    outcome,
     prUrl,
     signals,
     stopReason: stopReasonFor(markerExit, undefined, lastResultSubtype(stream), lastResultTerminalReason(stream)),
@@ -147,7 +144,7 @@ async function watchRun(name: string, flags: WatchFlags, repoRoot: string): Prom
     mode === "blind"
       ? (readBlindStream(name, workDir, path.join(transcriptDir, "stream.jsonl"), secrets) ?? "")
       : undefined;
-  const { decision, metrics, signals, stopReason, ...reading } = streamReading(stream, end.markerExit);
+  const { decision, metrics, outcome, signals, stopReason, ...reading } = streamReading(stream, end.markerExit);
   const session = rescueSessionTranscript(name, transcriptDir, startedAt, secrets);
   const model = reading.model ?? (session === undefined ? undefined : runModel(session));
 
@@ -180,6 +177,7 @@ async function watchRun(name: string, flags: WatchFlags, repoRoot: string): Prom
       kit: undefined,
       model,
       nudge: nudgeRecord(name, workDir),
+      outcome,
       prUrl,
       review: flags.review,
       signals,

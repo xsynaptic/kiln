@@ -35,9 +35,18 @@ export const outcomes = {
   committed: { commits: 1, hasPr: false, stopReason: "failed:exit:1" },
   delivered: { commits: 1, hasPr: true, stopReason: "completed" },
   diedWithPr: { commits: 1, hasPr: true, stopReason: "failed:exit:1" },
+  noChange: {
+    commits: 0,
+    hasPr: false,
+    outcome: { kind: "no-change", reason: "nothing to change" },
+    stopReason: "completed",
+  },
   noReceipt: undefined,
   nothing: { commits: 0, hasPr: false, stopReason: "completed" },
-} as const;
+} as const satisfies Record<
+  string,
+  (Pick<RunReceipt, "commits" | "outcome" | "stopReason"> & { hasPr: boolean }) | undefined
+>;
 
 export type Outcome = keyof typeof outcomes;
 
@@ -165,15 +174,9 @@ export function endRun(world: World, slot: string, outcome: Outcome): void {
   if (run === undefined || shape === undefined) {
     return;
   }
-  const pr = shape.hasPr ? world.github.open(run.beadId, run.branch) : undefined;
-  appendReceipt(
-    world,
-    runReceipt(run, slot, {
-      commits: shape.commits,
-      stopReason: shape.stopReason,
-      ...(pr === undefined ? {} : { prUrl: prUrl(pr.number) }),
-    }),
-  );
+  const { hasPr, ...fields } = shape;
+  const pr = hasPr ? world.github.open(run.beadId, run.branch) : undefined;
+  appendReceipt(world, runReceipt(run, slot, { ...fields, ...(pr === undefined ? {} : { prUrl: prUrl(pr.number) }) }));
 }
 
 export function aHumanActsOn(world: World, beadId: string): void {

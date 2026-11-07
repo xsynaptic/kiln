@@ -18,8 +18,9 @@ import {
   writeGuestFile,
 } from "../vm/vm.ts";
 import { watchSession } from "./guest-wait.ts";
-import { attendedStopReason, runModel } from "./receipts.ts";
+import { attendedStopReason } from "./receipts.ts";
 import { modelFlag, reAnchorCommand, taskBranch } from "./run-args.ts";
+import { runModel } from "./run-stream.ts";
 import { finishReceipt, probeCommits, prUrlForBranch, rescuePaneLog, rescueSessionTranscript } from "./run-tail.ts";
 
 export async function runAttended(context: RunContext): Promise<void> {
@@ -94,6 +95,7 @@ export async function runAttended(context: RunContext): Promise<void> {
       kit,
       model: session === undefined ? undefined : runModel(session),
       nudge: undefined,
+      outcome: undefined,
       prUrl,
       review: args.review,
       signals: undefined,

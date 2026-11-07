@@ -33,6 +33,7 @@ const none: ReceiptExtras = {
   kit: undefined,
   model: undefined,
   nudge: undefined,
+  outcome: undefined,
   prUrl: undefined,
   review: undefined,
   signals: undefined,

@@ -14,6 +14,8 @@ import { gateNames, replayDecision } from "./kiln-gate-replay.mjs";
 const busyExit = 75;
 const usageExit = 64;
 const forwardedSignals = ["SIGHUP", "SIGINT", "SIGTERM"];
+const reapGraceMs = 2000;
+const shownDirt = 10;
 const zeroSha = /^0+$/;
 const gatesFile = path.join(path.dirname(fileURLToPath(import.meta.url)), "gates.json");
 
@@ -48,7 +50,7 @@ function git(args) {
   if (result.status !== 0) {
     throw new Error(`git ${args.join(" ")} failed: ${result.stderr.trim()}`);
   }
-  return result.stdout.trim();
+  return result.stdout.trimEnd();
 }
 
 function gateDir() {
@@ -56,10 +58,16 @@ function gateDir() {
 }
 
 function worktreeState() {
-  return {
-    isDirty: git(["--no-optional-locks", "status", "--porcelain"]) !== "",
-    tree: git(["rev-parse", "HEAD^{tree}"]),
-  };
+  const dirt = git(["--no-optional-locks", "status", "--porcelain"])
+    .split("\n")
+    .filter((line) => line !== "");
+  return { dirt, isDirty: dirt.length > 0, tree: git(["rev-parse", "HEAD^{tree}"]) };
+}
+
+function listDirt(dirt) {
+  const shown = dirt.slice(0, shownDirt).map((line) => `  ${line}\n`);
+  const hidden = dirt.length - shown.length;
+  return `${shown.join("")}${hidden > 0 ? `  and ${String(hidden)} more\n` : ""}`;
 }
 
 function parseJson(raw) {
@@ -102,10 +110,27 @@ function readLock(lockPath) {
   if (holder === undefined) {
     return { holder: {}, isLive: true };
   }
-  return { holder, isLive: isAlive(holder.pid) || isAlive(-holder.group) };
+  return { holder, isLive: isAlive(holder.pid) };
 }
 
-function takeLock(lockPath, name) {
+async function reapGroup(group) {
+  if (!Number.isSafeInteger(group) || group <= 0) {
+    return;
+  }
+  try {
+    process.kill(-group, "SIGTERM");
+  } catch {
+    return;
+  }
+  for (let waited = 0; waited < reapGraceMs && isAlive(-group); waited += 50) {
+    await sleep(50);
+  }
+  try {
+    process.kill(-group, "SIGKILL");
+  } catch {}
+}
+
+async function takeLock(lockPath, name) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const fd = openSync(lockPath, "wx");
@@ -121,6 +146,7 @@ function takeLock(lockPath, name) {
     if (lock?.isLive === true) {
       return lock.holder;
     }
+    await reapGroup(lock?.holder.group);
     rmSync(lockPath, { force: true });
   }
   return {};
@@ -146,7 +172,7 @@ async function runGate(name) {
   const dir = gateDir();
   mkdirSync(dir, { recursive: true });
   const lockPath = path.join(dir, "lock");
-  const holder = takeLock(lockPath, name);
+  const holder = await takeLock(lockPath, name);
   if (holder !== undefined) {
     const running = holder.name === undefined ? "a gate" : `the ${String(holder.name)} gate`;
     process.stderr.write(
@@ -161,7 +187,6 @@ async function runGate(name) {
   }
 }
 
-// An interrupted gate writes no verdict, so a baseline reset that kills it cannot race a late write past its clean
 async function gateUnderLock({ command, dir, env, lockPath, name }) {
   const verdictPath = path.join(dir, `${name}.json`);
   rmSync(verdictPath, { force: true });
@@ -195,7 +220,7 @@ function runTeed(command, env, logPath, onSpawn) {
   const child = spawn(command, {
     detached: true,
     env: { ...process.env, ...env },
-    shell: true,
+    shell: "/bin/bash",
     stdio: ["ignore", "pipe", "pipe"],
   });
   onSpawn(child.pid);
@@ -259,8 +284,14 @@ function runTeed(command, env, logPath, onSpawn) {
 
 async function waitForGate() {
   const dir = gateDir();
-  while (readLock(path.join(dir, "lock"))?.isLive === true) {
+  const lockPath = path.join(dir, "lock");
+  let lock = readLock(lockPath);
+  while (lock?.isLive === true) {
     await sleep(1000);
+    lock = readLock(lockPath);
+  }
+  if (lock !== undefined) {
+    await reapGroup(lock.holder.group);
   }
   const name = readOptional(path.join(dir, "latest"))?.trim();
   if (name === undefined) {
@@ -288,27 +319,15 @@ function parsePushLines(input) {
     .split("\n")
     .map((line) => line.trim().split(/\s+/))
     .filter((fields) => fields.length === 4 && !zeroSha.test(fields[1]))
-    .map(([, localSha, , remoteSha]) => ({ localSha, remoteSha }));
+    .map(([, localSha]) => localSha);
 }
 
-function hasObject(sha) {
-  return spawnSync("git", ["cat-file", "-e", sha], { stdio: "ignore" }).status === 0;
-}
-
-function pushedRange(remote, { localSha, remoteSha }) {
-  if (!zeroSha.test(remoteSha) && hasObject(remoteSha)) {
-    return `${remoteSha}..${localSha}`;
-  }
-  return `${localSha} --not ${remote === undefined ? "--remotes" : `--remotes=${remote}`}`;
-}
-
-function scanSecrets(remote, updates) {
-  for (const update of updates) {
-    const result = spawnSync(
-      "gitleaks",
-      ["git", "--no-banner", "--redact", `--log-opts=${pushedRange(remote, update)}`],
-      { stdio: ["ignore", "inherit", "inherit"] },
-    );
+function scanSecrets(remote, pushedShas) {
+  const remotes = remote === undefined ? "--remotes" : `--remotes=${remote}`;
+  for (const sha of pushedShas) {
+    const result = spawnSync("gitleaks", ["git", "--no-banner", "--redact", `--log-opts=${sha} --not ${remotes}`], {
+      stdio: ["ignore", "inherit", "inherit"],
+    });
     if (result.error !== undefined) {
       process.stderr.write(`kiln-gate: gitleaks did not run (${result.error.message}); a push needs its secret scan\n`);
       return 1;
@@ -320,47 +339,54 @@ function scanSecrets(remote, updates) {
   return 0;
 }
 
-function pushState(updates) {
-  const { isDirty, tree } = worktreeState();
+function pushState(pushedShas) {
+  const { dirt, isDirty, tree } = worktreeState();
   return {
+    dirt,
     headTree: tree,
     isDirty,
-    pushedTrees: updates.map(({ localSha }) => git(["log", "-1", "--format=%T", localSha])),
+    pushedTrees: pushedShas.map((sha) => git(["log", "-1", "--format=%T", sha])),
     verdicts: readVerdicts(gateDir()),
   };
 }
 
-function refuse({ reason, trees }) {
+function refuse({ reason, trees }, dirt) {
   const why =
     reason === "dirty"
       ? "the working tree has uncommitted changes, so a gate run here would not grade what is pushed; commit or stash them, then push again"
       : "it is not the checked-out tree, so a gate run here cannot grade it; check it out, run `kiln-gate author`, then push again";
   process.stderr.write(`kiln-gate: no green verdict covers the pushed tree ${trees.join(", ")}, and ${why}\n`);
+  if (reason === "dirty") {
+    process.stderr.write(listDirt(dirt));
+  }
   return 1;
 }
 
 async function push(remote) {
-  const updates = parsePushLines(readFileSync(0, "utf8"));
-  const scanned = scanSecrets(remote, updates);
+  const pushedShas = parsePushLines(readFileSync(0, "utf8"));
+  const scanned = scanSecrets(remote, pushedShas);
   if (scanned !== 0) {
     return scanned;
   }
-  const decision = replayDecision(pushState(updates));
+  const state = pushState(pushedShas);
+  const decision = replayDecision(state);
   if (decision.kind === "pass") {
     return 0;
   }
   if (decision.kind === "refuse") {
-    return refuse(decision);
+    return refuse(decision, state.dirt);
   }
   const exit = await runGate("author");
   if (exit !== 0) {
     return exit;
   }
-  if (replayDecision(pushState(updates)).kind === "pass") {
+  const after = pushState(pushedShas);
+  if (replayDecision(after).kind === "pass") {
     return 0;
   }
   process.stderr.write(
     "kiln-gate: the author gate passed but left uncommitted changes or moved HEAD, so its verdict cannot replay; gitignore what the gate writes, commit, then push again\n",
   );
+  process.stderr.write(listDirt(after.dirt));
   return 1;
 }

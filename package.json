@@ -32,8 +32,8 @@
   },
   "files": [
     "dist",
-    "modes",
-    "skills"
+    "contracts",
+    "templates"
   ],
   "exports": {
     "./config": {

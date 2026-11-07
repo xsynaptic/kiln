@@ -101,6 +101,23 @@ describe("reconcile paths the lifecycle model found", { timeout: 30_000 }, () =>
     expect(bdReady().map((bead) => bead.id)).not.toContain(id);
   });
 
+  it("parks a run that found nothing to change, with its reason, and releases the claim", () => {
+    const id = launchedBead("already done on main");
+    const noChange = testReceipt({
+      bead: id,
+      branch,
+      commits: 0,
+      outcome: { kind: "no-change", reason: "main already carries the fix" },
+      slot,
+      startedAt: new Date().toISOString(),
+    });
+    reconcileQuietly([noChange]);
+    expect(isParked(id)).toBe(true);
+    expect(bdShow(id)).toMatchObject({ assignee: "", status: "open" });
+    expect(bd(["comments", id, "--json"])).toContain("main already carries the fix");
+    expect(bdReady().map((bead) => bead.id)).not.toContain(id);
+  });
+
   it("parks a run whose host wrapper died after the guest opened its PR, behind that PR", () => {
     vi.mocked(unclosedPrUrlsForHead).mockImplementation((head) =>
       head === branch ? ["https://github.com/acme/sample/pull/22"] : [],

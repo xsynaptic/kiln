@@ -31,10 +31,10 @@ Agents run without permission prompts inside the VM, so control sits at the edge
 - **Attended runs ask.** With `kiln run --attach` (or `kiln attach`), a human is in the session, and the agent asks rather than guesses.
 - **Anything that doesn't deliver is parked** behind a beads human gate with the reason: a run that died twice or with unpushed commits, ran past its time ceiling, found nothing to change, or that the gatekeeper escalated. `bd gate list` is the inbox, and `bd gate resolve` puts a task back in the queue.
 - **The gatekeeper escalates with one question.** It fixes what it can, and when landing would be wrong it labels the PR `needs-human` with a single question for you.
-- **The push hook runs the secret scan and your gate.** Every slot clone's pre-push hook is `kiln-gate push`: `gitleaks` over the pushed commits, then a green verdict replayed for each pushed tree, or your author gate run where there is none. It catches a run's mistakes, not a run set on getting around it: the run owns its VM and could rewrite the hook or a verdict. A check no run can skip belongs on `main` as a required CI status, and an agents' token without `workflow` scope can't change CI.
+- **The push hook runs the secret scan and your gate.** Every slot clone's pre-push hook is `kiln-gate push`: `gitleaks` over the pushed commits, then a green verdict replayed for the tip of each pushed ref, or your author gate run where there is none. It catches a run's mistakes, not a run set on getting around it: the run owns its VM and could rewrite the hook or a verdict. A check no run can skip belongs on `main` as a required CI status, and an agents' token without `workflow` scope can't change CI.
 - **Every run leaves a trail.** Each run writes a receipt, a transcript and a terminal log on the host, with credentials scrubbed out. PR bodies link the run and the task, and `kiln report` summarizes the week.
 
-The VM boundary, parking and attempt limits are enforced in code outside the slot. The gatekeeper runs the merge gate in its own run, under its own identity. The rest are rules in the mode docs each run is given, kept verbatim in [`modes/`](./modes).
+The VM boundary, parking and attempt limits are enforced in code outside the slot. The gatekeeper runs the merge gate in its own run, under its own identity. The rest are rules in the contracts each run is given, kept verbatim in [`contracts/`](./contracts).
 
 ## Getting started
 
@@ -59,6 +59,7 @@ Describe your project in a `kiln.config.ts` at the repository root. It is the on
 | --- | --- |
 | `identity` | the GitHub repository, the project name, and the agents' and gatekeeper's machine users |
 | `projectDoc` | the doc every run reads off `main` before it starts, ranked above the repository's own `CLAUDE.md` |
+| `playbooks` | optional per-role docs on `main` (`worker`, `session`, `gatekeeper`); start from [`templates/`](./templates) |
 | `gates` | the command a run closes on (`author`), the one that grades a landing (`merge`), the env they run with, and an optional command that warms their caches |
 | `guest` | what each slot VM gets installed: global packages, MCP servers, skills, pinned tool versions |
 | `slots` | how many slots may be provisioned, each VM's CPUs, memory and disk, the dev ports each one shifts, and the compose volumes a fresh run resets |
@@ -68,7 +69,7 @@ The schema exported from `@xsynaptic/kiln/config` documents every field. Running
 
 ### Your gate
 
-Kiln ships the gate machinery as `kiln-gate`, a command on every slot's `PATH`. You supply the commands it runs, each passing by exiting 0:
+Kiln ships the gate machinery as `kiln-gate`, a command on every slot's `PATH`. You supply the commands it runs under bash, each passing by exiting 0 and leaving `git status` as it found it, so whatever a gate writes belongs in `.gitignore`:
 
 - `gates.author`, the closing grade a run owes before its work leaves, run as `kiln-gate author`
 - `gates.merge`, the grade a landing owes, run on the composed tree as `kiln-gate merge`
@@ -112,7 +113,7 @@ The source is layered, and each folder imports only from the ones below it:
 | `src/vm/`                    | slot VMs: provisioning, leases, teardown and branch rescue     |
 | `src/config/`, `src/shared/` | the descriptor schema, and helpers every layer uses            |
 
-`modes/` and `skills/` are the prose staged into every slot. `verify/` holds the unit tests, the integration tests against the installed `bd`, the TLA+ models, and the fakes they share.
+`contracts/` is staged into every slot; `templates/` is not. `verify/` holds the unit tests, the integration tests against the installed `bd`, the TLA+ models, and the fakes they share.
 
 ## Licence
 

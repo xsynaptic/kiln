@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
-import type { Args } from "./run-args.ts";
+import type { KilnConfig } from "../config/config-schema.ts";
+import type { Args, RunMode } from "./run-args.ts";
 import type { RunContext, RunCredentials } from "./run-context.ts";
 
 import { credentialsDir, kilnConfig } from "../config/config.ts";
@@ -14,9 +15,36 @@ import { parseClaudeVersion } from "../vm/toolchain.ts";
 import { didSshAnswer, guestClonePath, isVmRunning, sshCaptureSafe, writeGuestFile } from "../vm/vm.ts";
 import { runAttended } from "./attended-run.ts";
 import { runBlind } from "./blind-run.ts";
-import { currentBranch, prepareClone } from "./clone-baseline.ts";
+import { assertDocsOnMain, currentBranch, prepareClone } from "./clone-baseline.ts";
 import { runMode, taskBranch } from "./run-args.ts";
 import { wrapupHookSource } from "./wrapup-nudge.ts";
+
+interface LaunchPrompt {
+  branch: string;
+  briefPath: string;
+  contractsDir: string;
+  mode: RunMode;
+  playbook: string | undefined;
+}
+
+const playbookRoles = {
+  attended: "session",
+  detached: "worker",
+  gatekeeper: "gatekeeper",
+} as const satisfies Record<RunMode, keyof KilnConfig["playbooks"]>;
+
+// Nothing here is read from the branch, because a branch under review could rewrite its own instructions
+/** @internal */
+export function launchPrompt({ branch, briefPath, contractsDir, mode, playbook }: LaunchPrompt): string {
+  const lines = [
+    `Read ${briefPath} and complete that task. Your contract is ${contractsDir}/${mode}.md; follow it exactly.`,
+  ];
+  if (playbook !== undefined) {
+    lines.push(`Your playbook is ${playbook}.`);
+  }
+  lines.push(`The task branch ${branch} is already checked out.`);
+  return lines.join(" ");
+}
 
 export async function startRun(args: Args): Promise<void> {
   if (agentSlotFromName(args.name) === undefined) {
@@ -85,8 +113,15 @@ async function leasedRun(
     console.log(`baselining ${args.name} clone on github/${cloneBaseline.base}, branching ${branch}`);
     prepareClone(args.name, clonePath, cloneBaseline, credentials.tokens);
   }
+  const mode = runMode(args);
+  const playbook = kilnConfig.playbooks[playbookRoles[mode]];
+  assertDocsOnMain(
+    args.name,
+    clonePath,
+    playbook === undefined ? [kilnConfig.projectDoc] : [kilnConfig.projectDoc, playbook],
+  );
   writeGuestFile(args.name, briefPath, briefContent);
-  const { kit, modesDir } = stageGuestKit(args.name, clonePath, [wrapupHookSource()]);
+  const { contractsDir, kit } = stageGuestKit(args.name, clonePath, [wrapupHookSource()]);
   const claudeCode = parseClaudeVersion(sshCaptureSafe(args.name, `"$HOME/.local/bin/claude" --version`));
   const launchHead = sshCaptureSafe(args.name, `git -C ${JSON.stringify(clonePath)} rev-parse HEAD`);
   const baseline = sshCaptureSafe(args.name, `git -C ${JSON.stringify(clonePath)} rev-parse github/main`);
@@ -95,13 +130,7 @@ async function leasedRun(
   const transcriptDir = agentRunsPath(repoRoot, "transcripts", runName);
   ensureDir(transcriptDir);
 
-  // Nothing here is read from the branch, because a branch under review could rewrite its own instructions
-  const prompt =
-    `Read ${briefPath} and complete that task. Your operating manual is ` +
-    `${modesDir}/${runMode(args)}.md, staged by the host beside the mode docs it links; follow it ` +
-    `exactly, including the delivery steps. The project's additions are ${kilnConfig.projectDoc} on ` +
-    `\`github/main\`, which you read with \`git show github/main:<path>\`, as you do every repo ` +
-    `file it links. The task branch ${branch} is already checked out.`;
+  const prompt = launchPrompt({ branch, briefPath, contractsDir, mode, playbook });
 
   const context: RunContext = {
     ...credentials,

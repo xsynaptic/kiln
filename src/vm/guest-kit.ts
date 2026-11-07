@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   chmodSync,
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -10,11 +11,13 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
 import { kilnConfig } from "../config/config.ts";
-import { guestTarball, sshScriptWithInput } from "./vm.ts";
+import { mainCheckoutPath } from "../shared/run-artifacts.ts";
+import { agentPortBlock, agentSlotFromName } from "./ports.ts";
+import { guestTarball, sshScriptWithInput, writeGuestFile } from "./vm.ts";
 
 // Read from the host's own install, so a run gets the kiln the host runs rather than a copy its branch could rewrite
 const kilnRoot = path.resolve(import.meta.dirname, "..", "..");
@@ -35,8 +38,8 @@ function guestKitDir(clonePath: string): string {
   return path.posix.join(path.posix.dirname(clonePath), "kiln");
 }
 
-export function guestModesDir(clonePath: string): string {
-  return path.posix.join(guestKitDir(clonePath), "modes");
+function guestContractsDir(clonePath: string): string {
+  return path.posix.join(guestKitDir(clonePath), "contracts");
 }
 
 export function copyKilnGate(dir: string): void {
@@ -51,55 +54,92 @@ export function kilnGateLinkScript(clonePath: string): string {
 }
 
 /** @internal */
-export function renderMode(source: string, values: Readonly<Record<string, string>>): string {
+export function renderContract(source: string, values: Readonly<Record<string, string>>): string {
   return source.replaceAll(/\{\{([\w.]+)\}\}/g, (token, key: string) => {
     const value = values[key];
     if (value === undefined) {
-      throw new Error(`mode doc names ${token}, which the descriptor does not fill`);
+      throw new Error(`contract names ${token}, which the descriptor does not fill`);
     }
     return value;
   });
 }
 
 /** @internal */
-export function renderedModes(): Map<string, string> {
-  const dir = path.join(kilnRoot, "modes");
+export function renderedContracts(): Map<string, string> {
+  const dir = path.join(kilnRoot, "contracts");
   return new Map(
-    readdirSync(dir).map((file) => [file, renderMode(readFileSync(path.join(dir, file), "utf8"), placeholderValues)]),
+    readdirSync(dir).map((file) => [
+      file,
+      renderContract(readFileSync(path.join(dir, file), "utf8"), placeholderValues),
+    ]),
   );
 }
 
 export interface StagedKit {
+  contractsDir: string;
   kit: string;
-  modesDir: string;
 }
 
 export function stageGuestKit(profile: string, clonePath: string, alsoHashed: ReadonlyArray<string> = []): StagedKit {
-  const modesDir = guestModesDir(clonePath);
+  const contractsDir = guestContractsDir(clonePath);
   const kitDir = JSON.stringify(guestKitDir(clonePath));
   const staging = mkdtempSync(path.join(tmpdir(), "kiln-kit-"));
   try {
-    mkdirSync(path.join(staging, "modes"));
-    for (const [file, content] of renderedModes()) {
-      writeFileSync(path.join(staging, "modes", file), content);
+    mkdirSync(path.join(staging, "contracts"));
+    for (const [file, content] of renderedContracts()) {
+      writeFileSync(path.join(staging, "contracts", file), content);
     }
-    cpSync(path.join(kilnRoot, "skills"), path.join(staging, "skills"), { recursive: true });
+    stageGuestSkills(path.join(staging, "skills"));
     copyKilnGate(staging);
     writeFileSync(path.join(staging, "gates.json"), gatesJson());
     sshScriptWithInput(
       profile,
       [
-        `rm -rf ${kitDir}`,
-        `mkdir -p ${kitDir} "$HOME/.claude/skills"`,
+        `rm -rf ${kitDir} "$HOME/.claude/skills"`,
+        `mkdir -p ${kitDir} "$HOME/.claude"`,
         `base64 -d | tar -x --warning=no-unknown-keyword -C ${kitDir}`,
-        `for skill in ${kitDir}/skills/*/; do [ -d "$skill" ] || continue; name=$(basename "$skill"); rm -rf "$HOME/.claude/skills/$name"; cp -r "$skill" "$HOME/.claude/skills/$name"; done`,
+        `cp -r ${kitDir}/skills "$HOME/.claude/skills"`,
       ].join(" && "),
       guestTarball(staging, { followSymlinks: false }),
     );
-    return { kit: kitRevision(staging, alsoHashed), modesDir };
+    writeGuestFile(profile, "$HOME/.claude/CLAUDE.md", guestStub(profile, contractsDir, kilnConfig.playbooks.session));
+    return { contractsDir, kit: kitRevision(staging, alsoHashed) };
   } finally {
     rmSync(staging, { force: true, recursive: true });
   }
+}
+
+/** @internal */
+export function guestStub(profile: string, contractsDir: string, sessionPlaybook: string | undefined): string {
+  const slot = agentSlotFromName(profile);
+  if (slot === undefined) {
+    throw new Error(`${profile} is not a kiln slot`);
+  }
+  const playbook = sessionPlaybook === undefined ? [] : [`Your playbook is \`${sessionPlaybook}\`.`];
+  return [
+    `# Sandbox slot ${profile}`,
+    "",
+    `A dispatched run follows the contract its launch prompt names. Every other session is attended: follow \`${contractsDir}/attended.md\`.`,
+    ...playbook,
+    "",
+    `Dev servers run on port block +${String(agentPortBlock(slot).offset)}000; use the URLs the stack prints.`,
+    "",
+  ].join("\n");
+}
+
+function stageGuestSkills(target: string): void {
+  mkdirSync(target);
+  const configured = kilnConfig.guest.skillsDir;
+  if (configured === undefined) {
+    return;
+  }
+  const dir = configured.startsWith("~/")
+    ? path.join(homedir(), configured.slice(2))
+    : path.resolve(mainCheckoutPath(), configured);
+  if (!existsSync(dir)) {
+    throw new Error(`guest.skillsDir points at a missing folder: ${dir}`);
+  }
+  cpSync(dir, target, { dereference: true, recursive: true });
 }
 
 function gatesJson(): string {

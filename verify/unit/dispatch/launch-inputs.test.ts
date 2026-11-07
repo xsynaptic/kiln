@@ -32,8 +32,8 @@ describe("composeBrief", () => {
     );
   });
 
-  it("leaves the operating manual to the run prompt", () => {
-    expect(composeBrief(bead, "feat/fix-the-thing", [])).not.toContain("operating manual");
+  it("leaves naming the contract to the run prompt", () => {
+    expect(composeBrief(bead, "feat/fix-the-thing", [])).not.toContain("contract");
   });
 });
 

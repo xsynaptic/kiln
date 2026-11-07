@@ -36,7 +36,8 @@ const observedFields = [
 ] as const;
 
 const secondPrecision = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
-const microsecondPrecision = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
+// bd trims trailing zeros from the fraction, so `.2913Z` is a microsecond stamp
+const microsecondPrecision = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{1,6}Z$/;
 
 interface Names {
   byId: Map<string, string>;

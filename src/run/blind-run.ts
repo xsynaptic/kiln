@@ -20,16 +20,9 @@ import {
   writeGuestFile,
 } from "../vm/vm.ts";
 import { awaitGuestMarker } from "./guest-wait.ts";
-import {
-  lastResultSubtype,
-  lastResultTerminalReason,
-  resultMetrics,
-  runModel,
-  runOutput,
-  runOutputSchema,
-  stopReasonFor,
-} from "./receipts.ts";
+import { runOutput, runOutputSchema, stopReasonFor } from "./receipts.ts";
 import { modelFlag, reAnchorCommand, taskBranch } from "./run-args.ts";
+import { lastResultSubtype, lastResultTerminalReason, resultMetrics, runModel } from "./run-stream.ts";
 import { finishReceipt, probeCommits, prUrlForBranch, rescueSessionTranscript, scrubFile } from "./run-tail.ts";
 import { nudgeMarkerFile, nudgeRecord, wrapupHookFile, wrapupHookSource, wrapupSettings } from "./wrapup-nudge.ts";
 
@@ -176,6 +169,7 @@ export async function runBlind(context: RunContext): Promise<void> {
       kit,
       model: runModel(stream),
       nudge: nudgeRecord(args.name, workDir),
+      outcome: output.outcome,
       prUrl,
       review: args.review,
       signals: output.signals,

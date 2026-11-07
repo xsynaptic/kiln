@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { glob } from "tinyglobby";
 
@@ -11,20 +10,12 @@ import { kilnConfig } from "../config/config.ts";
 import { isPortInUse } from "../shared/net.ts";
 import { capture, runOrThrow } from "../shared/proc.ts";
 import { mainCheckoutPath } from "../shared/run-artifacts.ts";
-import { guestModesDir, kilnGateLinkScript, stageGuestKit } from "./guest-kit.ts";
+import { kilnGateLinkScript, stageGuestKit } from "./guest-kit.ts";
 import { acquireLease } from "./lease.ts";
 import { agentPortBlock, pinEnvPorts } from "./ports.ts";
 import { boundaryDrillScript, guestBaseScript, guestClockScript, guestProjectScript } from "./provision-scripts.ts";
 import { slotToolchain, toolchainStamp } from "./toolchain.ts";
-import {
-  guestClonePath,
-  guestTarball,
-  isVmRunning,
-  sshScript,
-  sshScriptWithInput,
-  stampSlotProvisioned,
-  writeGuestFile,
-} from "./vm.ts";
+import { guestClonePath, isVmRunning, sshScript, stampSlotProvisioned, writeGuestFile } from "./vm.ts";
 
 interface Slot {
   block: PortBlock;
@@ -79,11 +70,8 @@ async function provision(slot: Slot, repoRoot: string): Promise<void> {
   console.log(`copying env files (node ports pinned to block +${String(slot.block.offset)}000)`);
   await copyEnvFiles(slot, repoRoot, clonePath);
 
-  console.log(`writing the sandbox identity stub (guest ~/.claude/CLAUDE.md) and statusline`);
-  writeGuestStub(slot, clonePath);
+  console.log(`writing the guest statusline`);
   writeGuestStatusline(slot);
-  syncGuestSkills(slot.profile, repoRoot);
-  // After the skills sync, which replaces the whole folder
   stageGuestKit(slot.profile, clonePath);
   sshScript(slot.profile, kilnGateLinkScript(clonePath));
 
@@ -196,26 +184,6 @@ function startVm(profile: string, repoRoot: string): void {
   }
 }
 
-function syncGuestSkills(profile: string, repoRoot: string): void {
-  const configured = kilnConfig.guest.skillsDir;
-  if (configured === undefined) {
-    console.log("no guest.skillsDir in kiln.config.ts; skipping guest skills");
-    return;
-  }
-  const dir = configured.startsWith("~/")
-    ? path.join(homedir(), configured.slice(2))
-    : path.resolve(repoRoot, configured);
-  if (!existsSync(dir)) {
-    throw new Error(`guest.skillsDir points at a missing folder: ${dir}`);
-  }
-  sshScriptWithInput(
-    profile,
-    `rm -rf "$HOME/.claude/skills" && mkdir -p "$HOME/.claude/skills" && base64 -d | tar -x --warning=no-unknown-keyword -C "$HOME/.claude/skills"`,
-    guestTarball(dir, { followSymlinks: true }),
-  );
-  console.log(`  synced guest skills from ${configured}`);
-}
-
 function writeGuestStatusline(slot: Slot): void {
   writeGuestFile(
     slot.profile,
@@ -230,27 +198,4 @@ function writeGuestStatusline(slot: Slot): void {
     ].join("\n"),
   );
   sshScript(slot.profile, `chmod +x "$HOME/.claude/statusline.sh"`);
-}
-
-function writeGuestStub(slot: Slot, clonePath: string): void {
-  const offset = String(slot.block.offset);
-  const modesDir = guestModesDir(clonePath);
-  writeGuestFile(
-    slot.profile,
-    "$HOME/.claude/CLAUDE.md",
-    [
-      `# Sandbox slot ${slot.profile}`,
-      "",
-      `Every session on this machine runs inside sandbox slot ${slot.profile}, in a disposable`,
-      "VM-local clone. A dispatched run is told its operating manual by its launch prompt; every",
-      `other session is attended and follows \`${modesDir}/attended.md\`, which the host stages`,
-      "there with the other mode docs at every launch. Read it before working, and the project's",
-      `additions in \`${kilnConfig.projectDoc}\` on \`github/main\` (\`git show github/main:<path>\`).`,
-      "Together they win over interactive defaults.",
-      "",
-      `The dev servers run on port block +${offset}000: use the URLs the stack's own output`,
-      "names, never the documented defaults.",
-      "",
-    ].join("\n"),
-  );
 }

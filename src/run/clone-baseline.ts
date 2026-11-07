@@ -58,6 +58,22 @@ export function prepareCloneScript(
   ].join("\n");
 }
 
+/** @internal */
+export function missingOnMainScript(clonePath: string, docs: ReadonlyArray<string>): string {
+  const listed = docs.map((doc) => JSON.stringify(doc)).join(" ");
+  return `cd ${JSON.stringify(clonePath)} && for doc in ${listed}; do git cat-file -e "github/main:$doc" 2>/dev/null || echo "$doc"; done`;
+}
+
+export function assertDocsOnMain(profile: string, clonePath: string, docs: ReadonlyArray<string>): void {
+  const missing = sshCaptureSafe(profile, missingOnMainScript(clonePath, docs));
+  if (missing === undefined) {
+    throw new Error(`could not ask ${profile} whether ${docs.join(", ")} are on github/main`);
+  }
+  if (missing !== "") {
+    throw new Error(`${missing.replaceAll("\n", ", ")} not on github/main; push it, or fix the path in kiln.config.ts`);
+  }
+}
+
 export function currentBranch(profile: string, clonePath: string): string | undefined {
   return sshCaptureSafe(profile, `git -C ${JSON.stringify(clonePath)} branch --show-current`);
 }

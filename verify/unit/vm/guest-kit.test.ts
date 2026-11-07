@@ -5,32 +5,59 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { RunMode } from "#src/run/run-args.ts";
 
-import { kitRevision, renderedModes, renderMode } from "#src/vm/guest-kit.ts";
+import { guestStub, kitRevision, renderContract, renderedContracts } from "#src/vm/guest-kit.ts";
 
-describe("renderedModes", () => {
-  const modes = renderedModes();
+describe("renderedContracts", () => {
+  const contracts = renderedContracts();
 
-  it("carries a manual for every mode a run can be launched in", () => {
+  it("carries a contract for every mode a run can be launched in", () => {
     const launched: Array<RunMode> = ["attended", "detached", "gatekeeper"];
     for (const mode of launched) {
-      expect(modes.has(`${mode}.md`)).toBe(true);
+      expect(contracts.has(`${mode}.md`)).toBe(true);
     }
   });
 
   it("leaves no placeholder unfilled", () => {
-    for (const [file, content] of modes) {
+    for (const [file, content] of contracts) {
       expect({ file, open: content.match(/\{\{[^}]*\}\}/g) }).toEqual({ file, open: null });
     }
   });
 
+  it("links only other contracts, since nothing else is staged beside them", () => {
+    for (const [file, content] of contracts) {
+      const targets = [...content.matchAll(/\]\(([^)]+)\)/g)].map((match) => match[1] ?? "");
+      const strays = targets.filter((target) => !/^\.\/[\w-]+\.md$/.test(target) || !contracts.has(target.slice(2)));
+      expect({ file, strays }).toEqual({ file, strays: [] });
+    }
+  });
+
   it("names the descriptor's project doc", () => {
-    expect(modes.get("envelope.md")).toContain("git show github/main:docs/agents.md");
+    expect(contracts.get("envelope.md")).toContain("`docs/agents.md`");
   });
 });
 
-describe("renderMode", () => {
+describe("guestStub", () => {
+  const contractsDir = "/home/agent/kiln/contracts";
+
+  it("points an attended session at its contract, then the session playbook", () => {
+    const stub = guestStub("kiln-3", contractsDir, "docs/kiln/session.md");
+    const contractAt = stub.indexOf(`${contractsDir}/attended.md`);
+    expect(contractAt).toBeGreaterThan(-1);
+    expect(stub.indexOf("docs/kiln/session.md")).toBeGreaterThan(contractAt);
+  });
+
+  it("names no playbook when the project configures none", () => {
+    expect(guestStub("kiln-3", contractsDir, undefined)).not.toContain("playbook");
+  });
+
+  it("refuses a profile that is not a slot, which has no port block", () => {
+    expect(() => guestStub("default", contractsDir, undefined)).toThrow("not a kiln slot");
+  });
+});
+
+describe("renderContract", () => {
   it("refuses a placeholder the descriptor does not fill", () => {
-    expect(() => renderMode("run {{gates.lint}}", { "gates.author": "x" })).toThrow("{{gates.lint}}");
+    expect(() => renderContract("run {{gates.lint}}", { "gates.author": "x" })).toThrow("{{gates.lint}}");
   });
 });
 
@@ -53,20 +80,20 @@ describe("kitRevision", () => {
   }
 
   it("moves when a staged file loses a line, and holds across stagings of the same bytes", () => {
-    const full = { "modes/envelope.md": "one\ntwo\n", "skills/critique/SKILL.md": "x" };
-    const iced = { "modes/envelope.md": "one\n", "skills/critique/SKILL.md": "x" };
+    const full = { "contracts/envelope.md": "one\ntwo\n", "skills/critique/SKILL.md": "x" };
+    const iced = { "contracts/envelope.md": "one\n", "skills/critique/SKILL.md": "x" };
     expect(kitRevision(stagedKit(full), [])).toBe(kitRevision(stagedKit(full), []));
     expect(kitRevision(stagedKit(iced), [])).not.toBe(kitRevision(stagedKit(full), []));
   });
 
   it("tells apart the same bytes under different file names", () => {
-    expect(kitRevision(stagedKit({ "modes/a.md": "ab" }), [])).not.toBe(
-      kitRevision(stagedKit({ "modes/b.md": "ab" }), []),
+    expect(kitRevision(stagedKit({ "contracts/a.md": "ab" }), [])).not.toBe(
+      kitRevision(stagedKit({ "contracts/b.md": "ab" }), []),
     );
   });
 
   it("moves when a file hashed beside the kit changes", () => {
-    const kit = stagedKit({ "modes/a.md": "ab" });
+    const kit = stagedKit({ "contracts/a.md": "ab" });
     const harness = stagedKit({ "hook.mjs": "one" });
     const hook = path.join(harness, "hook.mjs");
     const before = kitRevision(kit, [hook]);

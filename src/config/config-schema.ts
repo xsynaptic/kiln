@@ -76,6 +76,12 @@ const guestSchema = z.object({
   skillsDir: z.string().min(1).optional(),
 });
 
+const playbooksSchema = z.object({
+  gatekeeper: guestPathSchema.optional(),
+  session: guestPathSchema.optional(),
+  worker: guestPathSchema.optional(),
+});
+
 const vmSchema = z.object({
   cpus: z.number().int().min(1).default(4),
   diskGib: z.number().int().min(1).default(60),
@@ -103,6 +109,7 @@ export const kilnConfigSchema = z.object({
   gates: gatesSchema,
   guest: guestSchema.prefault({}),
   identity: identitySchema,
+  playbooks: playbooksSchema.prefault({}),
   projectDoc: guestPathSchema,
   slots: slotsSchema.prefault({}),
 });

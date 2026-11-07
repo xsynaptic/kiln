@@ -49,8 +49,8 @@ describe("composeReviewBrief", () => {
     expect(composeReviewBrief(brief())).not.toContain("Signal slugs");
   });
 
-  it("leaves the operating manual to the run prompt", () => {
-    expect(composeReviewBrief(brief())).not.toContain("operating manual");
+  it("leaves naming the contract to the run prompt", () => {
+    expect(composeReviewBrief(brief())).not.toContain("contract");
   });
 });
 

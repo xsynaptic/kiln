@@ -68,7 +68,8 @@ const gitConfig = ["-c", "user.name=test", "-c", "user.email=test@example.com", 
 const stubGate = [
   `echo "$1 gate ran"`,
   `echo "$1" >> "$STUB_DIR/runs"`,
-  `while [ -e "$STUB_DIR/hold" ]; do sleep 0.05; done`,
+  `echo "$$" > "$STUB_DIR/pid-$1"`,
+  `while [ -e "$STUB_DIR/hold-$1" ]; do sleep 0.05; done`,
   `exit "$(cat "$STUB_DIR/exit" 2>/dev/null || echo 0)"`,
 ].join("\n");
 
@@ -141,8 +142,28 @@ function readVerdict(box: Box, name: string): unknown {
   return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
 }
 
-function pushLine(sha: string): string {
-  return `refs/heads/feat ${sha} refs/heads/feat ${"0".repeat(40)}\n`;
+function pushLine(sha: string, remoteSha = "0".repeat(40)): string {
+  return `refs/heads/feat ${sha} refs/heads/feat ${remoteSha}\n`;
+}
+
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function orphanGate(box: Box): Promise<number> {
+  writeFileSync(path.join(box.stub, "hold-author"), "");
+  const author = startKilnGate(box, ["author"]);
+  await untilGateRuns(box);
+  author.child.kill("SIGKILL");
+  await author.done;
+  const orphan = Number(readFileSync(path.join(box.stub, "pid-author"), "utf8"));
+  expect(isRunning(orphan)).toBe(true);
+  return orphan;
 }
 
 async function untilGateRuns(box: Box): Promise<void> {
@@ -216,13 +237,13 @@ describe("the kiln-gate script in a clone", () => {
 
   it("refuses a second gate over a live one and names the wait", async () => {
     const box = sandbox();
-    writeFileSync(path.join(box.stub, "hold"), "");
+    writeFileSync(path.join(box.stub, "hold-author"), "");
     const author = startKilnGate(box, ["author"]);
     await untilGateRuns(box);
     const second = kilnGate(box, ["merge"]);
     expect(second.status).toBe(75);
     expect(second.stderr).toContain("kiln-gate wait");
-    rmSync(path.join(box.stub, "hold"));
+    rmSync(path.join(box.stub, "hold-author"));
     const first = await author.done;
     expect(first.status).toBe(0);
     expect(gateRuns(box)).toEqual(["author"]);
@@ -231,14 +252,14 @@ describe("the kiln-gate script in a clone", () => {
 
   it("waits out the running gate, then reports its verdict and exits with its code", async () => {
     const box = sandbox();
-    writeFileSync(path.join(box.stub, "hold"), "");
+    writeFileSync(path.join(box.stub, "hold-author"), "");
     writeFileSync(path.join(box.stub, "exit"), "4");
     const author = startKilnGate(box, ["author"]);
     await untilGateRuns(box);
     const waiting = startKilnGate(box, ["wait"]);
     await sleep(300);
     expect(waiting.child.exitCode).toBeNull();
-    rmSync(path.join(box.stub, "hold"));
+    rmSync(path.join(box.stub, "hold-author"));
     const waited = await waiting.done;
     expect(waited.status).toBe(4);
     expect(waited.stdout).toContain(`"tree":"${git(box, "rev-parse", "HEAD^{tree}")}"`);
@@ -254,6 +275,23 @@ describe("the kiln-gate script in a clone", () => {
     expect(kilnGate(box, ["author"]).status).toBe(0);
   });
 
+  it("reaps the gate a killed holder orphaned, then runs the next one", async () => {
+    const box = sandbox();
+    const orphan = await orphanGate(box);
+    expect(kilnGate(box, ["merge"]).status).toBe(0);
+    expect(isRunning(orphan)).toBe(false);
+    expect(gateRuns(box)).toEqual(["author", "merge"]);
+  });
+
+  it("reports an orphaned gate as stopped rather than wait on it, and reaps it", async () => {
+    const box = sandbox();
+    const orphan = await orphanGate(box);
+    const waited = kilnGate(box, ["wait"]);
+    expect(waited.status).toBe(1);
+    expect(waited.stderr).toContain("the author gate was stopped");
+    expect(isRunning(orphan)).toBe(false);
+  });
+
   it("reports no verdict when no gate has finished", () => {
     const run = kilnGate(sandbox(), ["wait"]);
     expect(run.status).toBe(1);
@@ -263,7 +301,7 @@ describe("the kiln-gate script in a clone", () => {
   it("reports a stopped gate as no verdict rather than fall back to the other gate's green", async () => {
     const box = sandbox();
     kilnGate(box, ["author"]);
-    writeFileSync(path.join(box.stub, "hold"), "");
+    writeFileSync(path.join(box.stub, "hold-merge"), "");
     const merge = startKilnGate(box, ["merge"]);
     await vi.waitFor(
       () => {
@@ -326,7 +364,20 @@ describe("the kiln-gate script in a clone", () => {
     const push = kilnGate(box, ["push", "origin"], { input: pushLine(git(box, "rev-parse", "HEAD")) });
     expect(push.status).toBe(1);
     expect(push.stderr).toContain("uncommitted changes");
+    expect(push.stderr).toContain("?? scratch.txt");
     expect(gateRuns(box)).toEqual(["author"]);
+  });
+
+  it("scans a push to an existing branch past every remote ref, not from the branch's old tip", () => {
+    const box = sandbox();
+    const base = git(box, "rev-parse", "HEAD");
+    commitFile(box, "readme.md", "second\n");
+    kilnGate(box, ["author"]);
+    const head = git(box, "rev-parse", "HEAD");
+    expect(kilnGate(box, ["push", "origin"], { input: pushLine(head, base) }).status).toBe(0);
+    expect(readFileSync(path.join(box.bin, "gitleaks-args"), "utf8")).toContain(
+      `--log-opts=${head} --not --remotes=origin`,
+    );
   });
 
   it("stops at a secret-scan finding before any gate runs", () => {

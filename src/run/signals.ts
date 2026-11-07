@@ -7,7 +7,7 @@ import { agentRunsPath, ensureDir } from "../shared/run-artifacts.ts";
 
 const header = `# Signals
 
-Friction filed by runs (their structured output, per the detached mode doc) or added by hand. A queue,
+Friction filed by runs (their structured output, per the detached contract) or added by hand. A queue,
 not a record: triage while operating the loop, and delete entries freely once actioned.
 `;
 

@@ -23,4 +23,4 @@ A comment survives only where deleting it would let a competent reader introduce
 
 ## Runtime prose
 
-`modes/` and `skills/` ship in the package and are staged into every slot, so they point at nothing outside the package.
+`contracts/` is staged into every slot, so a contract links only other contracts. `templates/` is staged nowhere; a consumer copies it whole, so its links stay inside it.

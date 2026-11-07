@@ -1,6 +1,10 @@
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { prepareCloneScript } from "#src/run/clone-baseline.ts";
+import { missingOnMainScript, prepareCloneScript } from "#src/run/clone-baseline.ts";
 
 describe("prepareCloneScript", () => {
   it("fetches main alongside a non-main base, so a review's github/main is never stale", () => {
@@ -63,5 +67,25 @@ describe("prepareCloneScript", () => {
     const script = prepareCloneScript("/work/repo", baseline, undefined, ["db", "queue"]);
     expect(script).toContain("docker compose down --volumes db queue >");
     expect(prepareCloneScript("/work/repo", baseline)).not.toContain("--volumes");
+  });
+});
+
+describe("missingOnMainScript", () => {
+  it("names only the docs github/main lacks, whatever the checked-out branch holds", () => {
+    const clone = mkdtempSync(path.join(tmpdir(), "kiln-docs-"));
+    try {
+      const git = (...args: Array<string>) => execFileSync("git", ["-C", clone, ...args], { encoding: "utf8" });
+      git("init", "--quiet", "--initial-branch", "main");
+      mkdirSync(path.join(clone, "docs"));
+      writeFileSync(path.join(clone, "docs/agents.md"), "doc\n");
+      git("add", ".");
+      git("-c", "user.email=a@b", "-c", "user.name=a", "commit", "--quiet", "-m", "doc");
+      git("update-ref", "refs/remotes/github/main", "HEAD");
+      writeFileSync(path.join(clone, "docs/worker.md"), "unpushed\n");
+      const script = missingOnMainScript(clone, ["docs/agents.md", "docs/worker.md", "docs/gatekeeper.md"]);
+      expect(execFileSync("bash", ["-c", script], { encoding: "utf8" })).toBe("docs/worker.md\ndocs/gatekeeper.md\n");
+    } finally {
+      rmSync(clone, { force: true, recursive: true });
+    }
   });
 });

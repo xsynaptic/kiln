@@ -80,7 +80,7 @@ function marker(tokens, minutes, isOverTokens, isOverTime) {
 }
 
 function nudge(where) {
-  const message = `Budget notice from the harness, authoritative: ${where}. Stop starting new work. You have two acceptable endings and finishing is only one of them: deliver the work if it is deliverable in the room that is left, or hand it off so another agent finishes it. Handing off means committing what is green, getting the branch off this machine, and writing on your bead what is done and what remains. Your operating manual says what each of those requires. Begin nothing you cannot finish.`;
+  const message = `Budget notice from the harness, authoritative: ${where}. Stop starting new work. You have two acceptable endings and finishing is only one of them: deliver the work if it is deliverable in the room that is left, or hand it off so another agent finishes it. Handing off means committing what is green, pushing the branch, opening its PR, and writing on your bead what is done and what remains. Your contract says what each of those requires. Begin nothing you cannot finish.`;
   process.stdout.write(
     JSON.stringify({
       hookSpecificOutput: {
