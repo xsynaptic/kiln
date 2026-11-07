@@ -2,6 +2,7 @@
 // Copied into the guest as is, so it can only import node's built-in modules
 
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { constants } from "node:os";
 import path from "node:path";
@@ -108,46 +109,93 @@ function readLock(lockPath) {
   }
   const holder = parseJson(raw);
   if (holder === undefined) {
-    return { holder: {}, isLive: true };
+    return { holder: {}, isLive: true, raw };
   }
-  return { holder, isLive: isAlive(holder.pid) };
+  return { holder, isLive: isAlive(holder.pid), raw };
 }
 
-async function reapGroup(group) {
-  if (!Number.isSafeInteger(group) || group <= 0) {
-    return;
+function processStart(pid) {
+  const result = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
+  });
+  const started = result.status === 0 ? result.stdout.trim() : "";
+  return started === "" ? undefined : started;
+}
+
+function signalGateGroup({ group, groupStartedAt }, signal) {
+  if (typeof groupStartedAt !== "string" || !Number.isSafeInteger(group) || group <= 0) {
+    return false;
+  }
+  if (processStart(group) !== groupStartedAt) {
+    return false;
   }
   try {
-    process.kill(-group, "SIGTERM");
+    process.kill(-group, signal);
+    return true;
   } catch {
+    return false;
+  }
+}
+
+async function reapGroup(holder) {
+  if (!signalGateGroup(holder, "SIGTERM")) {
     return;
   }
-  for (let waited = 0; waited < reapGraceMs && isAlive(-group); waited += 50) {
+  for (let waited = 0; waited < reapGraceMs && isAlive(-holder.group); waited += 50) {
     await sleep(50);
   }
+  signalGateGroup(holder, "SIGKILL");
+}
+
+function createLock(lockPath, name) {
+  let fd;
   try {
-    process.kill(-group, "SIGKILL");
-  } catch {}
+    fd = openSync(lockPath, "wx");
+  } catch (error) {
+    if (error.code === "EEXIST") {
+      return false;
+    }
+    throw error;
+  }
+  writeSync(fd, JSON.stringify({ name, pid: process.pid, startedAt: new Date().toISOString() }));
+  closeSync(fd);
+  return true;
+}
+
+function removeStaleLock(lockPath, raw) {
+  const claim = `${lockPath}.${createHash("sha256").update(raw).digest("hex").slice(0, 16)}`;
+  try {
+    closeSync(openSync(claim, "wx"));
+  } catch (error) {
+    if (error.code === "EEXIST") {
+      return;
+    }
+    throw error;
+  }
+  try {
+    if (readOptional(lockPath) === raw) {
+      rmSync(lockPath, { force: true });
+    }
+  } finally {
+    rmSync(claim, { force: true });
+  }
 }
 
 async function takeLock(lockPath, name) {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const fd = openSync(lockPath, "wx");
-      writeSync(fd, JSON.stringify({ name, pid: process.pid, startedAt: new Date().toISOString() }));
-      closeSync(fd);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (createLock(lockPath, name)) {
       return;
-    } catch (error) {
-      if (error.code !== "EEXIST") {
-        throw error;
-      }
     }
     const lock = readLock(lockPath);
     if (lock?.isLive === true) {
       return lock.holder;
     }
-    await reapGroup(lock?.holder.group);
-    rmSync(lockPath, { force: true });
+    if (lock === undefined) {
+      continue;
+    }
+    await reapGroup(lock.holder);
+    removeStaleLock(lockPath, lock.raw);
   }
   return {};
 }
@@ -194,7 +242,8 @@ async function gateUnderLock({ command, dir, env, lockPath, name }) {
   const startedAt = new Date().toISOString();
   const before = worktreeState();
   const onSpawn = (group) => {
-    writeFileSync(lockPath, JSON.stringify({ group, name, pid: process.pid, startedAt }));
+    const groupStartedAt = processStart(group);
+    writeFileSync(lockPath, JSON.stringify({ group, groupStartedAt, name, pid: process.pid, startedAt }));
   };
   const { exit, interruptedBy } = await runTeed(command, env, path.join(dir, `${name}.log`), onSpawn);
   if (interruptedBy !== undefined) {
@@ -291,7 +340,7 @@ async function waitForGate() {
     lock = readLock(lockPath);
   }
   if (lock !== undefined) {
-    await reapGroup(lock.holder.group);
+    await reapGroup(lock.holder);
   }
   const name = readOptional(path.join(dir, "latest"))?.trim();
   if (name === undefined) {
@@ -319,13 +368,24 @@ function parsePushLines(input) {
     .split("\n")
     .map((line) => line.trim().split(/\s+/))
     .filter((fields) => fields.length === 4 && !zeroSha.test(fields[1]))
-    .map(([, localSha]) => localSha);
+    .map(([, localSha, , remoteSha]) => ({ localSha, remoteSha }));
 }
 
-function scanSecrets(remote, pushedShas) {
-  const remotes = remote === undefined ? "--remotes" : `--remotes=${remote}`;
-  for (const sha of pushedShas) {
-    const result = spawnSync("gitleaks", ["git", "--no-banner", "--redact", `--log-opts=${sha} --not ${remotes}`], {
+function hasCommit(sha) {
+  return spawnSync("git", ["cat-file", "-e", `${sha}^0`], { stdio: "ignore" }).status === 0;
+}
+
+function scanRange({ localSha, remoteSha }, remote) {
+  if (!zeroSha.test(remoteSha) && hasCommit(remoteSha)) {
+    return `${remoteSha}..${localSha}`;
+  }
+  return `${localSha} --not ${remote === undefined ? "--remotes" : `--remotes=${remote}`}`;
+}
+
+function scanSecrets(remote, pushes) {
+  for (const pushed of pushes) {
+    const range = scanRange(pushed, remote);
+    const result = spawnSync("gitleaks", ["git", "--no-banner", "--redact", `--log-opts=${range}`], {
       stdio: ["ignore", "inherit", "inherit"],
     });
     if (result.error !== undefined) {
@@ -363,11 +423,12 @@ function refuse({ reason, trees }, dirt) {
 }
 
 async function push(remote) {
-  const pushedShas = parsePushLines(readFileSync(0, "utf8"));
-  const scanned = scanSecrets(remote, pushedShas);
+  const pushes = parsePushLines(readFileSync(0, "utf8"));
+  const scanned = scanSecrets(remote, pushes);
   if (scanned !== 0) {
     return scanned;
   }
+  const pushedShas = pushes.map((pushed) => pushed.localSha);
   const state = pushState(pushedShas);
   const decision = replayDecision(state);
   if (decision.kind === "pass") {

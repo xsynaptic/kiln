@@ -66,6 +66,7 @@ describe("replayDecision", () => {
 const gitConfig = ["-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false"];
 
 const stubGate = [
+  `if [ -e "$STUB_DIR/ignore-term-$1" ]; then trap "" TERM; fi`,
   `echo "$1 gate ran"`,
   `echo "$1" >> "$STUB_DIR/runs"`,
   `echo "$$" > "$STUB_DIR/pid-$1"`,
@@ -275,6 +276,24 @@ describe("the kiln-gate script in a clone", () => {
     expect(kilnGate(box, ["author"]).status).toBe(0);
   });
 
+  it("never signals a group that a dead holder's lock names once another process holds that id", async () => {
+    const box = sandbox();
+    const gone = spawnSync("true");
+    const stranger = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+    try {
+      const lock = { group: stranger.pid, groupStartedAt: "Thu Jan  1 00:00:00 1970", name: "author", pid: gone.pid };
+      mkdirSync(path.join(box.repo, ".git", "kiln-gate"));
+      writeFileSync(path.join(box.repo, ".git", "kiln-gate", "lock"), JSON.stringify(lock));
+      expect(kilnGate(box, ["wait"]).status).toBe(1);
+      expect(kilnGate(box, ["author"]).status).toBe(0);
+      await sleep(100);
+      expect(stranger.exitCode).toBeNull();
+      expect(stranger.signalCode).toBeNull();
+    } finally {
+      stranger.kill("SIGKILL");
+    }
+  });
+
   it("reaps the gate a killed holder orphaned, then runs the next one", async () => {
     const box = sandbox();
     const orphan = await orphanGate(box);
@@ -282,6 +301,26 @@ describe("the kiln-gate script in a clone", () => {
     expect(isRunning(orphan)).toBe(false);
     expect(gateRuns(box)).toEqual(["author", "merge"]);
   });
+
+  it("lets one of two gates racing over a stale lock take it and turns the other away", async () => {
+    const box = sandbox();
+    writeFileSync(path.join(box.stub, "ignore-term-author"), "");
+    await orphanGate(box);
+    writeFileSync(path.join(box.stub, "hold-merge"), "");
+    const racers = [startKilnGate(box, ["merge"]), startKilnGate(box, ["merge"])];
+    const turnedAway = await Promise.race(racers.map(async (racer) => racer.done));
+    expect(turnedAway.status).toBe(75);
+    await vi.waitFor(
+      () => {
+        expect(gateRuns(box)).toEqual(["author", "merge"]);
+      },
+      { interval: 20, timeout: 5000 },
+    );
+    rmSync(path.join(box.stub, "hold-merge"));
+    const finished = await Promise.all(racers.map(async (racer) => racer.done));
+    expect(finished.map((run) => run.status).toSorted()).toEqual([0, 75]);
+    expect(gateRuns(box)).toEqual(["author", "merge"]);
+  }, 15_000);
 
   it("reports an orphaned gate as stopped rather than wait on it, and reaps it", async () => {
     const box = sandbox();
@@ -368,13 +407,22 @@ describe("the kiln-gate script in a clone", () => {
     expect(gateRuns(box)).toEqual(["author"]);
   });
 
-  it("scans a push to an existing branch past every remote ref, not from the branch's old tip", () => {
+  it("scans a push to an existing branch from the branch's old tip, whatever the remote-tracking refs say", () => {
     const box = sandbox();
     const base = git(box, "rev-parse", "HEAD");
     commitFile(box, "readme.md", "second\n");
     kilnGate(box, ["author"]);
     const head = git(box, "rev-parse", "HEAD");
     expect(kilnGate(box, ["push", "origin"], { input: pushLine(head, base) }).status).toBe(0);
+    expect(readFileSync(path.join(box.bin, "gitleaks-args"), "utf8")).toContain(`--log-opts=${base}..${head}`);
+  });
+
+  it("scans past every remote ref when the branch's old tip is not in the clone", () => {
+    const box = sandbox();
+    kilnGate(box, ["author"]);
+    const head = git(box, "rev-parse", "HEAD");
+    const missingTip = "a".repeat(40);
+    expect(kilnGate(box, ["push", "origin"], { input: pushLine(head, missingTip) }).status).toBe(0);
     expect(readFileSync(path.join(box.bin, "gitleaks-args"), "utf8")).toContain(
       `--log-opts=${head} --not --remotes=origin`,
     );
