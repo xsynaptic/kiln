@@ -37,7 +37,7 @@ describe("kilnConfigSchema", () => {
       resetVolumes: [],
       vm: { cpus: 4, diskGib: 60, memoryGib: 6 },
     });
-    expect(parsed.gates).toEqual({ author: "make check", env: {}, merge: "make ci", verdictFiles: {} });
+    expect(parsed.gates).toEqual({ author: "make check", env: {}, merge: "make ci" });
   });
 
   it("names the clone after the repository unless the descriptor says otherwise", () => {
@@ -80,11 +80,10 @@ describe("kilnConfigSchema", () => {
     expect(() => kilnConfigSchema.parse(badName)).toThrow();
   });
 
-  it("takes clone-relative verdict paths and rejects absolute or shell-unsafe ones", () => {
-    const files = { "check.json": ".git/gate/check.json", "verdict.json": "../verdict.json" };
-    expect(kilnConfigSchema.parse(withGates({ verdictFiles: files })).gates.verdictFiles).toEqual(files);
-    expect(() => kilnConfigSchema.parse(withGates({ verdictFiles: { "a.json": "/etc/passwd" } }))).toThrow();
-    expect(() => kilnConfigSchema.parse(withGates({ verdictFiles: { "a.json": "a.json; rm -rf ~" } }))).toThrow();
+  it("takes a clone-relative project doc and rejects absolute or shell-unsafe ones", () => {
+    expect(kilnConfigSchema.parse({ ...valid, projectDoc: "docs/agents.md" }).projectDoc).toBe("docs/agents.md");
+    expect(() => kilnConfigSchema.parse({ ...valid, projectDoc: "/etc/passwd" })).toThrow();
+    expect(() => kilnConfigSchema.parse({ ...valid, projectDoc: "agents.md; rm -rf ~" })).toThrow();
   });
 
   it("rejects a host link that would break out of its guest shell line or read as a flag", () => {

@@ -1,5 +1,15 @@
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -9,16 +19,35 @@ import { guestTarball, sshScriptWithInput } from "./vm.ts";
 // Read from the host's own install, so a run gets the kiln the host runs rather than a copy its branch could rewrite
 const kilnRoot = path.resolve(import.meta.dirname, "..", "..");
 
+const kilnGateFile = "kiln-gate.mjs";
+
+const kilnGateFiles = [kilnGateFile, "kiln-gate-replay.mjs"];
+
+export const guestKilnGateDir = ".git/kiln-gate";
+
 const placeholderValues: Readonly<Record<string, string>> = {
-  "gates.author": kilnConfig.gates.author,
-  "gates.merge": kilnConfig.gates.merge,
   githubRepo: kilnConfig.identity.githubRepo,
   projectDoc: kilnConfig.projectDoc,
   "slots.vm.memoryGib": String(kilnConfig.slots.vm.memoryGib),
 };
 
+function guestKitDir(clonePath: string): string {
+  return path.posix.join(path.posix.dirname(clonePath), "kiln");
+}
+
 export function guestModesDir(clonePath: string): string {
-  return path.posix.join(path.posix.dirname(clonePath), "kiln", "modes");
+  return path.posix.join(guestKitDir(clonePath), "modes");
+}
+
+export function copyKilnGate(dir: string): void {
+  for (const file of kilnGateFiles) {
+    cpSync(path.join(import.meta.dirname, "..", "run", file), path.join(dir, file));
+  }
+  chmodSync(path.join(dir, kilnGateFile), 0o755);
+}
+
+export function kilnGateLinkScript(clonePath: string): string {
+  return `sudo ln -sfn ${JSON.stringify(path.posix.join(guestKitDir(clonePath), kilnGateFile))} /usr/local/bin/kiln-gate`;
 }
 
 /** @internal */
@@ -47,7 +76,7 @@ export interface StagedKit {
 
 export function stageGuestKit(profile: string, clonePath: string, alsoHashed: ReadonlyArray<string> = []): StagedKit {
   const modesDir = guestModesDir(clonePath);
-  const kitDir = JSON.stringify(path.posix.dirname(modesDir));
+  const kitDir = JSON.stringify(guestKitDir(clonePath));
   const staging = mkdtempSync(path.join(tmpdir(), "kiln-kit-"));
   try {
     mkdirSync(path.join(staging, "modes"));
@@ -55,6 +84,8 @@ export function stageGuestKit(profile: string, clonePath: string, alsoHashed: Re
       writeFileSync(path.join(staging, "modes", file), content);
     }
     cpSync(path.join(kilnRoot, "skills"), path.join(staging, "skills"), { recursive: true });
+    copyKilnGate(staging);
+    writeFileSync(path.join(staging, "gates.json"), gatesJson());
     sshScriptWithInput(
       profile,
       [
@@ -69,6 +100,11 @@ export function stageGuestKit(profile: string, clonePath: string, alsoHashed: Re
   } finally {
     rmSync(staging, { force: true, recursive: true });
   }
+}
+
+function gatesJson(): string {
+  const { author, env, merge } = kilnConfig.gates;
+  return `${JSON.stringify({ author, env, merge }, undefined, 2)}\n`;
 }
 
 /** @internal */

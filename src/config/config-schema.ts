@@ -35,7 +35,6 @@ const gatesSchema = z.object({
   author: z.string().min(1),
   env: z.record(envKeySchema, shellWord(/^[\w.:/-]+$/)).default({}),
   merge: z.string().min(1),
-  verdictFiles: z.record(z.string().regex(/^[\w.-]+$/), guestPathSchema).default({}),
   warmCommand: z.string().min(1).optional(),
 });
 

@@ -31,10 +31,12 @@ export function gateEnvExportLines(gateEnv: Record<string, string>): Array<strin
   return Object.entries(gateEnv).map(([name, value]) => `export ${name}=${value}`);
 }
 
-// lefthook's hook honours LEFTHOOK=0, which would let a guest skip the secret scan
+// Resolved through core.hooksPath, which hook managers such as husky move
 export const pushGateShimLines = [
-  String.raw`printf '%s\n' '#!/bin/sh' 'unset LEFTHOOK LEFTHOOK_EXCLUDE' 'exec pnpm exec lefthook run pre-push "$@"' > .git/hooks/pre-push`,
-  "chmod +x .git/hooks/pre-push",
+  'HOOKS_DIR="$(git rev-parse --git-path hooks)"',
+  'mkdir -p "$HOOKS_DIR"',
+  String.raw`printf '%s\n' '#!/bin/sh' 'exec kiln-gate push "$@"' > "$HOOKS_DIR/pre-push"`,
+  'chmod +x "$HOOKS_DIR/pre-push"',
 ];
 
 // An xterm TERM keeps claude's working titles, because herdr reads the screen-256color fallback as idle

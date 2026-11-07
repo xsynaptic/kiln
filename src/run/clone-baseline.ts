@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import { kilnConfig } from "../config/config.ts";
+import { guestKilnGateDir } from "../vm/guest-kit.ts";
 import { pushGateShimLines, singleQuote, sshCaptureSafe, sshScriptWithInput } from "../vm/vm.ts";
 
 interface CloneBaseline {
@@ -12,7 +13,6 @@ interface CloneBaseline {
 export function prepareCloneScript(
   clonePath: string,
   baseline: CloneBaseline,
-  verdictFiles: Array<string>,
   warmCommand?: string,
   resetVolumes: Array<string> = [],
 ): string {
@@ -25,9 +25,7 @@ export function prepareCloneScript(
     "IFS= read -r GH_TOKEN",
     "export GH_TOKEN",
     `cd ${JSON.stringify(clonePath)}`,
-    ...verdictFiles.map((guestPath) => `rm -f ${path.posix.join(clonePath, guestPath)}`),
-    // Logs are gitignored, so a stale one would survive the clean and pass for the next run's gate output
-    `rm -f ${path.posix.join(clonePath, "*.log")}`,
+    `rm -rf ${path.posix.join(clonePath, guestKilnGateDir)}`,
     // Start every -f pattern with ^: this script is in the remote bash's own command line, so an unanchored pattern kills that shell
     // node needs -f because it renames its main thread, so -x never matches it
     `docker compose down --remove-orphans >/dev/null 2>&1 || true`,
@@ -55,8 +53,6 @@ export function prepareCloneScript(
     "git update-ref refs/remotes/origin/main refs/remotes/github/main",
     "git clean -fdq",
     "pnpm install --prefer-offline --reporter=silent",
-    // An existing node_modules skips lefthook's postinstall, so hooks added since provisioning would never install
-    "pnpm exec lefthook install",
     ...pushGateShimLines,
     ...(warmCommand === undefined ? [] : [`setsid bash -c ${singleQuote(warmCommand)} >/dev/null 2>&1 &`]),
   ].join("\n");
@@ -69,13 +65,7 @@ export function currentBranch(profile: string, clonePath: string): string | unde
 export function prepareClone(profile: string, clonePath: string, baseline: CloneBaseline, tokens: string): void {
   sshScriptWithInput(
     profile,
-    prepareCloneScript(
-      clonePath,
-      baseline,
-      Object.values(kilnConfig.gates.verdictFiles),
-      kilnConfig.gates.warmCommand,
-      kilnConfig.slots.resetVolumes,
-    ),
+    prepareCloneScript(clonePath, baseline, kilnConfig.gates.warmCommand, kilnConfig.slots.resetVolumes),
     tokens,
   );
 }

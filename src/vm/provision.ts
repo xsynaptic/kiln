@@ -11,7 +11,7 @@ import { kilnConfig } from "../config/config.ts";
 import { isPortInUse } from "../shared/net.ts";
 import { capture, runOrThrow } from "../shared/proc.ts";
 import { mainCheckoutPath } from "../shared/run-artifacts.ts";
-import { guestModesDir, stageGuestKit } from "./guest-kit.ts";
+import { guestModesDir, kilnGateLinkScript, stageGuestKit } from "./guest-kit.ts";
 import { acquireLease } from "./lease.ts";
 import { agentPortBlock, pinEnvPorts } from "./ports.ts";
 import { boundaryDrillScript, guestBaseScript, guestClockScript, guestProjectScript } from "./provision-scripts.ts";
@@ -85,6 +85,7 @@ async function provision(slot: Slot, repoRoot: string): Promise<void> {
   syncGuestSkills(slot.profile, repoRoot);
   // After the skills sync, which replaces the whole folder
   stageGuestKit(slot.profile, clonePath);
+  sshScript(slot.profile, kilnGateLinkScript(clonePath));
 
   // Last, so a slot that failed anywhere above reads as unprovisioned rather than ready
   stampSlotProvisioned(slot.profile, toolchainStamp(toolchain));

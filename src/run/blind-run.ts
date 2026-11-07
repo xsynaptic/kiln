@@ -1,4 +1,4 @@
-import { createWriteStream, readFileSync } from "node:fs";
+import { createWriteStream, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
@@ -8,6 +8,7 @@ import { kilnConfig } from "../config/config.ts";
 import { agentRunsRoot } from "../shared/run-artifacts.ts";
 import { lineScrubber } from "../shared/scrub.ts";
 import { beadsClient } from "../vm/beads.ts";
+import { guestKilnGateDir } from "../vm/guest-kit.ts";
 import {
   agentRunExportLine,
   bashTimeoutExportLine,
@@ -45,16 +46,23 @@ interface LaunchResult {
   signal: string | undefined;
 }
 
-// Scrubbed like the stream, because a file can hold raw output from a process that had the run's credentials
-function fetchTranscriptFiles(
+// Scrubbed like the stream, because a gate log can hold raw output from a process that had the run's credentials
+function fetchGateFiles(
   name: string,
   paths: { clonePath: string; runSecrets: Array<string>; transcriptDir: string },
 ): void {
-  for (const [transcriptName, guestPath] of Object.entries(kilnConfig.gates.verdictFiles)) {
-    const hostPath = path.join(paths.transcriptDir, transcriptName);
-    if (didScpFromGuest(name, path.posix.join(paths.clonePath, guestPath), hostPath)) {
-      scrubFile(hostPath, paths.runSecrets);
-    }
+  const hostDir = path.join(paths.transcriptDir, "kiln-gate");
+  mkdirSync(hostDir, { recursive: true });
+  for (const pattern of ["*.json", "*.log"]) {
+    didScpFromGuest(name, path.posix.join(paths.clonePath, guestKilnGateDir, pattern), hostDir);
+  }
+  const files = readdirSync(hostDir);
+  if (files.length === 0) {
+    rmSync(hostDir, { recursive: true });
+    return;
+  }
+  for (const file of files) {
+    scrubFile(path.join(hostDir, file), paths.runSecrets);
   }
 }
 
@@ -135,7 +143,7 @@ export async function runBlind(context: RunContext): Promise<void> {
     // The host copy stops when the connection drops, so the guest's file is the complete stream
     didScpFromGuest(args.name, guestStreamPath, streamLog);
     scrubFile(streamLog, runSecrets);
-    fetchTranscriptFiles(args.name, { clonePath, runSecrets, transcriptDir });
+    fetchGateFiles(args.name, { clonePath, runSecrets, transcriptDir });
   }
   const endedAt = new Date().toISOString();
 

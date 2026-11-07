@@ -14,26 +14,14 @@ import { hostLinkLines, toolProvisionLines } from "#src/vm/guest-tools.ts";
 import { gateEnvExportLines } from "#src/vm/vm.ts";
 import descriptor from "#support/descriptor.ts";
 
-const stubbedCommands = [
-  "sudo",
-  "npm",
-  "npx",
-  "docker",
-  "rm",
-  "ln",
-  "node",
-  "timeout",
-  "git",
-  "pkill",
-  "setsid",
-  "probe",
-];
+const stubbedCommands = ["sudo", "npm", "npx", "docker", "rm", "ln", "node", "timeout", "pkill", "setsid", "probe"];
 
 const record = String.raw`{ printf '%s' "$1"; shift; for arg in "$@"; do printf '\037%s' "$arg"; done; printf '\036'; } >> "$KILN_RECORD"`;
 
 const stubPreamble = [
   `record() { ${record}; }`,
   ...stubbedCommands.map((command) => `${command}() { record ${command} "$@"; }`),
+  'git() { record git "$@"; if [ "$1 $2" = "rev-parse --git-path" ]; then echo .git/hooks; fi; }',
   'pnpm() { record pnpm "$@"; echo /bin/sh; }',
 ].join("\n");
 
@@ -94,9 +82,6 @@ function acceptedValue(isAccepted: (value: string) => boolean) {
     .filter((value) => isAccepted(value));
 }
 
-const guestPath = acceptedValue((value) =>
-  isAcceptedConfig({ gates: { ...descriptor.gates, verdictFiles: { log: value } } }),
-);
 const resetVolume = acceptedValue((value) => isAcceptedConfig({ slots: { resetVolumes: [value] } }));
 const globalPackage = acceptedValue((value) => isAcceptedConfig({ guest: { globalPackages: [value] } }));
 const hostLink = acceptedValue((value) => isAcceptedConfig({ guest: { hostLinks: [value] } }));
@@ -151,32 +136,20 @@ function isFlag(value: string): boolean {
 
 // Each run starts bash, so a hundred runs can outlast the default timeout on a busy machine
 describe("config values a guest shell line carries", { timeout: 60_000 }, () => {
-  test.prop([fc.array(guestPath, { maxLength: 3 }), fc.array(resetVolume, { maxLength: 3 })])(
-    "reach the baseline reset as one word each",
-    (verdictFiles, resetVolumes) => {
-      const clonePath = mkdtempSync(path.join(root, "clone-"));
-      mkdirSync(path.join(clonePath, ".git", "hooks"), { recursive: true });
-      const script = prepareCloneScript(
-        clonePath,
-        { base: "main", branch: "feat/x" },
-        verdictFiles,
-        undefined,
-        resetVolumes,
-      );
-      const shell = runInBash(script, clonePath, "oauth\npat\n");
-      expect(shell.status).toBe(0);
-      const removed = shell.commands.filter(([command]) => command === "rm").map((argv) => argv.slice(1));
-      expect(removed).toEqual([
-        ...verdictFiles.map((file) => ["-f", path.posix.join(clonePath, file)]),
-        ["-f", path.posix.join(clonePath, "*.log")],
-      ]);
-      const volumeReset = shell.commands.filter((argv) => argv.includes("--volumes"));
-      expect(volumeReset).toEqual(
-        resetVolumes.length === 0 ? [] : [["docker", "compose", "down", "--volumes", ...resetVolumes]],
-      );
-      expect(resetVolumes.filter((volume) => isFlag(volume))).toEqual([]);
-    },
-  );
+  test.prop([fc.array(resetVolume, { maxLength: 3 })])("reach the baseline reset as one word each", (resetVolumes) => {
+    const clonePath = mkdtempSync(path.join(root, "clone-"));
+    mkdirSync(path.join(clonePath, ".git", "hooks"), { recursive: true });
+    const script = prepareCloneScript(clonePath, { base: "main", branch: "feat/x" }, undefined, resetVolumes);
+    const shell = runInBash(script, clonePath, "oauth\npat\n");
+    expect(shell.status).toBe(0);
+    const removed = shell.commands.filter(([command]) => command === "rm").map((argv) => argv.slice(1));
+    expect(removed).toEqual([["-rf", path.posix.join(clonePath, ".git", "kiln-gate")]]);
+    const volumeReset = shell.commands.filter((argv) => argv.includes("--volumes"));
+    expect(volumeReset).toEqual(
+      resetVolumes.length === 0 ? [] : [["docker", "compose", "down", "--volumes", ...resetVolumes]],
+    );
+    expect(resetVolumes.filter((volume) => isFlag(volume))).toEqual([]);
+  });
 
   test.prop([
     fc.array(globalPackage, { maxLength: 3 }),

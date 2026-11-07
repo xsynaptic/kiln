@@ -23,9 +23,7 @@ describe("renderedModes", () => {
     }
   });
 
-  it("names the descriptor's gates and project doc", () => {
-    expect(modes.get("detached.md")).toContain("`npm run verify`");
-    expect(modes.get("gatekeeper.md")).toContain("`npm run verify:all`");
+  it("names the descriptor's project doc", () => {
     expect(modes.get("envelope.md")).toContain("git show github/main:docs/agents.md");
   });
 });

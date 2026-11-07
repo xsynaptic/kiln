@@ -47,7 +47,7 @@
     "#support/*": "./verify/support/*"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp src/run/wrapup-hook.mjs dist/run/",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp src/run/*.mjs dist/run/",
     "changeset": "changeset",
     "check-models": "node verify/models/check-models.ts",
     "check": "lefthook run check",

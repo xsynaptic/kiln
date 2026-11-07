@@ -9,7 +9,7 @@ import { safeCapture } from "../shared/run-artifacts.ts";
 const packageManagerSchema = z.object({ packageManager: optionalText });
 
 // Bump this when the provisioning script itself changes; editing guest in kiln.config.ts already changes the stamp
-const slotContractVersion = 6;
+const slotContractVersion = 7;
 
 export interface SlotToolchain {
   beads: string;
