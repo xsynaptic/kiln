@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { AGENT_SLOT_NAMES, agentPortBlock, agentSlotFromName, pinEnvPorts } from "#src/vm/ports.ts";
+import { agentPortBlock, agentSlotFromName, agentSlotNames, pinEnvPorts } from "#src/vm/ports.ts";
 
 describe("agentSlotFromName", () => {
   it("accepts every slot name in the canonical list", () => {
-    for (const name of AGENT_SLOT_NAMES) {
+    for (const name of agentSlotNames) {
       expect(agentSlotFromName(name)).toBeDefined();
     }
     expect(agentSlotFromName("kiln-1")).toBe(1);
@@ -20,7 +20,7 @@ describe("agentSlotFromName", () => {
 });
 
 describe("agentPortBlock", () => {
-  const slots = AGENT_SLOT_NAMES.map((name) => agentSlotFromName(name)).filter((slot) => slot !== undefined);
+  const slots = agentSlotNames.map((name) => agentSlotFromName(name)).filter((slot) => slot !== undefined);
 
   it("never hands two slots, or a slot and the main checkout, the same port", () => {
     const mainPorts = Object.values(agentPortBlock(0).ports);

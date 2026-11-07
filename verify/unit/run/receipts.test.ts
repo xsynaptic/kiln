@@ -5,7 +5,7 @@ import type { RunReceipt } from "#src/run/receipts.ts";
 import {
   attendedStopReason,
   classifyProbe,
-  DEAD_MISS_LIMIT,
+  deadMissLimit,
   lastResultSubtype,
   lastResultTerminalReason,
   nextMisses,
@@ -350,7 +350,7 @@ describe("classifyProbe", () => {
 describe("nextMisses", () => {
   it("advances the tally only on a dead probe", () => {
     expect(nextMisses(0, "dead")).toBe(1);
-    expect(nextMisses(1, "dead")).toBe(DEAD_MISS_LIMIT);
+    expect(nextMisses(1, "dead")).toBe(deadMissLimit);
   });
 
   it("resets the tally on a live or unreachable probe", () => {
@@ -360,12 +360,12 @@ describe("nextMisses", () => {
 
   it("counts crashed only on two consecutive dead probes, a live one breaking the run", () => {
     let misses = nextMisses(0, "dead");
-    expect(misses).toBeLessThan(DEAD_MISS_LIMIT);
+    expect(misses).toBeLessThan(deadMissLimit);
     misses = nextMisses(misses, "running");
     misses = nextMisses(misses, "dead");
-    expect(misses).toBeLessThan(DEAD_MISS_LIMIT);
+    expect(misses).toBeLessThan(deadMissLimit);
     misses = nextMisses(misses, "dead");
-    expect(misses).toBe(DEAD_MISS_LIMIT);
+    expect(misses).toBe(deadMissLimit);
   });
 });
 

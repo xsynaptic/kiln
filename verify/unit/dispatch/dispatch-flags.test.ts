@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DIAL_DEFAULT, parseDispatchArgs } from "#src/dispatch/dispatch-flags.ts";
+import { dialDefault, parseDispatchArgs } from "#src/dispatch/dispatch-flags.ts";
 
 describe("parseDispatchArgs (the launch/settle boundary)", () => {
   it("launches nothing under reconcile", () => {
@@ -8,7 +8,7 @@ describe("parseDispatchArgs (the launch/settle boundary)", () => {
   });
 
   it("fills the fleet under launch", () => {
-    expect(parseDispatchArgs(["launch"]).dial).toBe(DIAL_DEFAULT);
+    expect(parseDispatchArgs(["launch"]).dial).toBe(dialDefault);
   });
 
   it("caps the fleet under launch", () => {

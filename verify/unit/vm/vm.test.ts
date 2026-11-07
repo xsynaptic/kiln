@@ -2,20 +2,20 @@ import { describe, expect, it } from "vitest";
 
 import { parseVmStates, singleQuote } from "#src/vm/vm.ts";
 
-const LIST_JSON = [
+const listJson = [
   '{"name":"kiln-1","status":"Stopped","arch":"aarch64","cpus":4,"memory":8589934592,"disk":64424509440,"runtime":"docker"}',
   '{"name":"kiln-2","status":"Running","arch":"aarch64","cpus":4,"memory":8589934592,"disk":64424509440,"runtime":"docker"}',
 ].join("\n");
 
 describe("parseVmStates", () => {
   it("reads a state per profile from colima's JSONL", () => {
-    const states = parseVmStates(LIST_JSON);
+    const states = parseVmStates(listJson);
     expect(states.get("kiln-1")).toBe("stopped");
     expect(states.get("kiln-2")).toBe("running");
   });
 
   it("leaves an unprovisioned profile absent rather than defaulting it", () => {
-    expect(parseVmStates(LIST_JSON).has("kiln-7")).toBe(false);
+    expect(parseVmStates(listJson).has("kiln-7")).toBe(false);
   });
 
   it("survives empty output, blank lines, and a truncated record", () => {

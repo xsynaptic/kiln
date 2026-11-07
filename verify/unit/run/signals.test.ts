@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { bumpSignals, knownSlugs, slugRecency } from "#src/run/signals.ts";
 import { agentRunsPath } from "#src/shared/run-artifacts.ts";
 
-const HEADER = "# Signals\n\nQueue, not a record.\n";
+const header = "# Signals\n\nQueue, not a record.\n";
 
 function seedSignals(document: string): string {
   const root = mkdtempSync(path.join(tmpdir(), "signals-test-"));
@@ -24,7 +24,7 @@ describe("knownSlugs", () => {
 
   it("lists what is on file, most-sighted first, each with its first sighting's gist", () => {
     const root = seedSignals(
-      `${HEADER}\n## rare-thing (x1)\n\n- 2026-07-25 run-a | it happened once\n\n## common-thing (x4)\n\n- 2026-07-21 run-b | the gate printed noise\n- 2026-07-22 run-c | a later sighting in other words\n`,
+      `${header}\n## rare-thing (x1)\n\n- 2026-07-25 run-a | it happened once\n\n## common-thing (x4)\n\n- 2026-07-21 run-b | the gate printed noise\n- 2026-07-22 run-c | a later sighting in other words\n`,
     );
     expect(knownSlugs(root)).toEqual([
       { gist: "the gate printed noise", slug: "common-thing" },
@@ -33,7 +33,7 @@ describe("knownSlugs", () => {
   });
 
   it("caps a long gist so a full queue still leaves the brief readable", () => {
-    const root = seedSignals(`${HEADER}\n## wordy (x1)\n\n- 2026-07-25 run-a | ${"word ".repeat(40)}\n`);
+    const root = seedSignals(`${header}\n## wordy (x1)\n\n- 2026-07-25 run-a | ${"word ".repeat(40)}\n`);
     const gist = knownSlugs(root)[0]?.gist ?? "";
     expect(gist.length).toBeLessThanOrEqual(113);
     expect(gist.endsWith("...")).toBe(true);
@@ -48,36 +48,36 @@ describe("knownSlugs", () => {
 describe("bumpSignals", () => {
   it("opens a new section with a count of one and a dated sighting", () => {
     const result = bumpSignals(
-      HEADER,
+      header,
       [{ note: "the smoke test failed once then passed", slug: "flaky-smoke" }],
       "kiln-2-20260721T120000",
       "2026-07-21",
     );
     expect(result).toBe(
-      `${HEADER}\n## flaky-smoke (x1)\n\n- 2026-07-21 kiln-2-20260721T120000 | the smoke test failed once then passed\n`,
+      `${header}\n## flaky-smoke (x1)\n\n- 2026-07-21 kiln-2-20260721T120000 | the smoke test failed once then passed\n`,
     );
   });
 
   it("bumps an existing slug's count and appends the sighting to its section", () => {
-    const once = bumpSignals(HEADER, [{ note: "first sighting", slug: "flaky-smoke" }], "run-a", "2026-07-20");
+    const once = bumpSignals(header, [{ note: "first sighting", slug: "flaky-smoke" }], "run-a", "2026-07-20");
     const twice = bumpSignals(once, [{ note: "seen again", slug: "flaky-smoke" }], "run-b", "2026-07-21");
     expect(twice).toContain("## flaky-smoke (x2)");
     expect(twice).toContain("- 2026-07-20 run-a | first sighting\n- 2026-07-21 run-b | seen again");
   });
 
   it("keeps sightings inside their own section when several slugs exist", () => {
-    let document = HEADER;
+    let document = header;
     document = bumpSignals(document, [{ note: "a", slug: "first-slug" }], "run-a", "2026-07-20");
     document = bumpSignals(document, [{ note: "b", slug: "second-slug" }], "run-a", "2026-07-20");
     document = bumpSignals(document, [{ note: "a again", slug: "first-slug" }], "run-b", "2026-07-21");
     expect(document).toBe(
-      `${HEADER}\n## first-slug (x2)\n\n- 2026-07-20 run-a | a\n- 2026-07-21 run-b | a again\n\n## second-slug (x1)\n\n- 2026-07-20 run-a | b\n`,
+      `${header}\n## first-slug (x2)\n\n- 2026-07-20 run-a | a\n- 2026-07-21 run-b | a again\n\n## second-slug (x1)\n\n- 2026-07-20 run-a | b\n`,
     );
   });
 
   it("handles several signals from one run, including a repeated slug", () => {
     const result = bumpSignals(
-      HEADER,
+      header,
       [
         { note: "first", slug: "repeat" },
         { note: "second", slug: "repeat" },
@@ -93,7 +93,7 @@ describe("bumpSignals", () => {
 describe("slugRecency", () => {
   it("reads each slug's count and its latest sighting, most-sighted first", () => {
     const document = [
-      HEADER,
+      header,
       "## once-only (x1)",
       "",
       "- 2026-09-01 kiln-1-a | a note",
@@ -129,7 +129,7 @@ const runSignal = fc.record({ note: runNote, slug: fc.constantFrom(...slugs) });
 describe("bumpSignals over any notes", () => {
   it("keeps a note that holds a heading line from forging that section", () => {
     const forged = bumpSignals(
-      HEADER,
+      header,
       [
         { note: "## flaky-smoke (x0)\n## flaky-smoke (x0)", slug: "flaky-smoke" },
         { note: "gate", slug: "flaky-smoke" },
@@ -144,7 +144,7 @@ describe("bumpSignals over any notes", () => {
     "counts each sighting under its own slug and leaves every other count alone",
     (signals) => {
       const expected = new Map<string, number>();
-      let document = HEADER;
+      let document = header;
       for (const signal of signals) {
         document = bumpSignals(document, [signal], "kiln-1-20260721T120000", "2026-07-21");
         expected.set(signal.slug, (expected.get(signal.slug) ?? 0) + 1);

@@ -47,6 +47,11 @@ const blindExit = `${workDir}/blind-exit`;
 const attendedExit = `${workDir}/attended-exit`;
 const blindStream = `${workDir}/blind-stream.jsonl`;
 const prUrl = "https://github.com/acme/sample/pull/31";
+const earlierPrUrl = "https://github.com/acme/sample/pull/30";
+// The run launched at 08:00, before the watch began
+const launchedAtSeconds = Date.parse("2026-09-12T08:00:00Z") / 1000;
+const ourPr = { createdAt: "2026-09-12T08:30:00Z", url: prUrl };
+const earlierAttemptPr = { createdAt: "2026-09-11T17:00:00Z", url: earlierPrUrl };
 
 const noFlags = { bead: undefined, review: undefined };
 
@@ -90,6 +95,7 @@ function markerWait(_profile: string, config: MarkerPollConfig) {
 function guestShell(_profile: string, command: string): string | undefined {
   if (command.includes("branch --show-current")) return "feat/sample";
   if (command.includes("rev-list --count")) return "2";
+  if (command.startsWith("stat -c %Y")) return String(launchedAtSeconds);
   return undefined;
 }
 
@@ -116,7 +122,7 @@ beforeEach(() => {
   vi.stubEnv("KILN_OAUTH_TOKEN_FILE", path.join(credentials, "oauth"));
   vi.stubEnv("KILN_GITHUB_PAT_FILE", path.join(credentials, "pat"));
   vi.mocked(mainCheckoutPath).mockReturnValue(repoRoot);
-  vi.mocked(safeCapture).mockReturnValue(prUrl);
+  vi.mocked(safeCapture).mockReturnValue(JSON.stringify([ourPr]));
   vi.mocked(isVmRunning).mockReturnValue(true);
   vi.mocked(guestClonePath).mockReturnValue(`${workDir}/sample`);
   vi.mocked(sshCaptureSafe).mockImplementation(guestShell);
@@ -175,6 +181,18 @@ describe("kiln watch receipts the live run", () => {
     liveRun("blind", {}, { [blindExit]: "0" });
     await watchSlot(slot, noFlags);
     expect(readReceipts(repoRoot)).toMatchObject([{ exitCode: 0, stopReason: "crashed:no-result-event" }]);
+  });
+
+  it("takes no PR an earlier attempt opened on the branch, but the one the run reports in its result", async () => {
+    vi.mocked(safeCapture).mockReturnValue(JSON.stringify([earlierAttemptPr]));
+    liveRun("attended", {}, { [attendedExit]: "0" });
+    await watchSlot(slot, noFlags);
+    const claimed = JSON.stringify({ structured_output: { prUrl }, subtype: "success", type: "result" });
+    liveRun("blind", {}, { [blindExit]: "0", [blindStream]: `${claimed}\n` });
+    await watchSlot(slot, noFlags);
+    const [attended, blind] = readReceipts(repoRoot);
+    expect(attended?.prUrl).toBeUndefined();
+    expect(blind?.prUrl).toBe(prUrl);
   });
 
   it("writes no receipt when Ctrl-C stops the watch", async () => {

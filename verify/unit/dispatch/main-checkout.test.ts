@@ -8,7 +8,7 @@ import { syncMain } from "#src/dispatch/main-checkout.ts";
 import { scrubGitEnv } from "#src/shared/git.ts";
 
 // Identity, signing, and hooks pinned so the developer's global git config cannot fail or slow a commit
-const GIT_CONFIG = [
+const gitConfig = [
   "-c",
   "user.name=test",
   "-c",
@@ -20,7 +20,7 @@ const GIT_CONFIG = [
 ];
 
 function git(cwd: string, ...args: Array<string>): string {
-  const result = spawnSync("git", [...GIT_CONFIG, ...args], { cwd, encoding: "utf8" });
+  const result = spawnSync("git", [...gitConfig, ...args], { cwd, encoding: "utf8" });
   if (result.status !== 0) {
     throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
   }

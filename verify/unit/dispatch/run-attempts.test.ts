@@ -11,12 +11,12 @@ import {
   spentAttempts,
 } from "#src/dispatch/run-attempts.ts";
 import { latestReceiptForBead } from "#src/dispatch/run-ledger.ts";
-import { DISPATCH_ACTOR } from "#src/queue/bd-client.ts";
+import { dispatchActor } from "#src/queue/bd-client.ts";
 import { testReceipt } from "#support/receipt-fixture.ts";
 
 function dispatched(createdAt = "2026-07-10T08:00:00Z"): BeadComment {
   return {
-    author: DISPATCH_ACTOR,
+    author: dispatchActor,
     createdAt,
     text: dispatchComment("kiln-1", "feat/x"),
   };
@@ -35,7 +35,7 @@ describe("spentAttempts", () => {
   it("counts only the launch comments, only from the dispatch actor", () => {
     const noise: Array<BeadComment> = [
       {
-        author: DISPATCH_ACTOR,
+        author: dispatchActor,
         createdAt: "2026-07-10T09:00:00Z",
         text: "PR open: https://example.com/pull/1; awaiting human review.",
       },
@@ -113,7 +113,7 @@ describe("latestDispatchTime", () => {
     const comments = [
       dispatched("2026-07-29T20:24:11Z"),
       dispatched("2026-07-30T10:32:44Z"),
-      { author: DISPATCH_ACTOR, createdAt: "2026-07-30T11:00:00Z", text: "PR open: later noise" },
+      { author: dispatchActor, createdAt: "2026-07-30T11:00:00Z", text: "PR open: later noise" },
     ];
     expect(latestDispatchTime(comments)).toBe("2026-07-30T10:32:44Z");
     expect(latestDispatchTime([])).toBeUndefined();

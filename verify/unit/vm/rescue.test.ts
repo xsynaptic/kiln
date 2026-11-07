@@ -47,8 +47,17 @@ const slot = "kiln-2";
 let calls: Array<string> = [];
 let repoRoot = "";
 
+const newTip = "a".repeat(40);
+const otherTip = "b".repeat(40);
+const staleTip = "c".repeat(40);
+
+// The guest's branch report: commits no remote has, the tip, the branch
+function line(count: number, branch: string, tip = newTip): string {
+  return `${String(count)} ${tip} ${branch}`;
+}
+
 interface Clone {
-  arrived: Array<string>;
+  arrived: Array<[branch: string, tip: string]>;
   isBundleFailing: boolean;
   report: string;
 }
@@ -70,7 +79,8 @@ function slotWith(clone: Clone): void {
   });
   vi.mocked(spawnSync).mockImplementation(((_command: string, args: ReadonlyArray<string>) => {
     const ref = args.at(-1) ?? "";
-    return { status: clone.arrived.some((branch) => ref.endsWith(`/${branch}`)) ? 0 : 1 };
+    const mirror = clone.arrived.find(([branch]) => ref === `refs/kiln/${slot}/${branch}`);
+    return mirror === undefined ? { status: 1, stdout: "" } : { status: 0, stdout: `${mirror[1]}\n` };
   }) as unknown as typeof spawnSync);
 }
 
@@ -99,7 +109,7 @@ beforeEach(() => {
   vi.mocked(runOrThrow).mockImplementation((command, args) => {
     calls.push(`${command} ${args.slice(0, 1).join(" ")}${args.includes("--data") ? " --data" : ""}`);
   });
-  slotWith({ arrived: [], isBundleFailing: false, report: "0 main" });
+  slotWith({ arrived: [], isBundleFailing: false, report: line(0, "main") });
   vi.spyOn(console, "log").mockReturnValue();
   vi.spyOn(console, "warn").mockReturnValue();
 });
@@ -132,7 +142,7 @@ describe("kiln rm refuses to destroy what it cannot save", () => {
   });
 
   it("refuses to delete after a failed rescue, and still lets a stop through", () => {
-    slotWith({ arrived: [], isBundleFailing: true, report: "2 feat/sample" });
+    slotWith({ arrived: [], isBundleFailing: true, report: line(2, "feat/sample") });
     expect(() => {
       rm("--delete");
     }).toThrow("refusing to delete kiln-2: branch rescue failed");
@@ -142,17 +152,35 @@ describe("kiln rm refuses to destroy what it cannot save", () => {
   });
 
   it("counts a rescue that mirrored fewer branches than it found as failed", () => {
-    slotWith({ arrived: ["feat/sample"], isBundleFailing: false, report: "2 feat/sample\n1 fix/other" });
+    slotWith({
+      arrived: [["feat/sample", newTip]],
+      isBundleFailing: false,
+      report: [line(2, "feat/sample"), line(1, "fix/other", otherTip)].join("\n"),
+    });
     expect(() => {
       rm("--delete");
     }).toThrow("branch rescue failed");
     expect(calls).not.toContain("colima delete --data");
   });
+
+  it("counts a branch the fetch skipped as unrescued, though an earlier teardown left its mirror ref", () => {
+    slotWith({ arrived: [["feat/sample", staleTip]], isBundleFailing: false, report: line(2, "feat/sample") });
+    expect(() => {
+      rm("--delete");
+    }).toThrow("branch rescue failed");
+    expect(calls).not.toContain("colima delete --data");
+    rm();
+    expect(calls).not.toContain("guest drop branches");
+  });
 });
 
 describe("kiln rm tears a slot down in order", () => {
   it("deletes the disk with the VM, after mirroring its unpushed branches, and leaves them in the clone", () => {
-    slotWith({ arrived: ["feat/sample"], isBundleFailing: false, report: "0 main\n2 feat/sample" });
+    slotWith({
+      arrived: [["feat/sample", newTip]],
+      isBundleFailing: false,
+      report: [line(0, "main", otherTip), line(2, "feat/sample")].join("\n"),
+    });
     rm("--delete");
     expect(calls).toEqual([
       "kill tunnel",
@@ -166,7 +194,11 @@ describe("kiln rm tears a slot down in order", () => {
   });
 
   it("stops without touching the disk, dropping the branches it mirrored", () => {
-    slotWith({ arrived: ["feat/sample"], isBundleFailing: false, report: "0 main\n2 feat/sample" });
+    slotWith({
+      arrived: [["feat/sample", newTip]],
+      isBundleFailing: false,
+      report: [line(0, "main", otherTip), line(2, "feat/sample")].join("\n"),
+    });
     rm();
     expect(calls).toEqual([
       "kill tunnel",
@@ -191,7 +223,7 @@ describe("kiln rm tears a slot down in order", () => {
       } catch (error) {
         launchMidRescue = error instanceof Error ? error.message : String(error);
       }
-      return "0 main";
+      return line(0, "main");
     });
     rm("--delete");
     expect(leaseMidRescue).toBe("teardown");
@@ -201,17 +233,27 @@ describe("kiln rm tears a slot down in order", () => {
 });
 
 describe("selectUnpushedBranches", () => {
-  it("keeps branches with commits no remote has and drops the rest", () => {
-    const report = ["0 main", "3 feat/batch-exports", "0 feat/delivered", "1 rescue/kiln-1-abc"].join("\n");
-    expect(selectUnpushedBranches(report)).toEqual(["feat/batch-exports", "rescue/kiln-1-abc"]);
+  it("keeps branches with commits no remote has, with their tips, and drops the rest", () => {
+    const report = [
+      line(0, "main"),
+      line(3, "feat/batch-exports"),
+      line(0, "feat/delivered"),
+      line(1, "rescue/kiln-1-abc", otherTip),
+    ].join("\n");
+    expect(selectUnpushedBranches(report)).toEqual([
+      { branch: "feat/batch-exports", tip: newTip },
+      { branch: "rescue/kiln-1-abc", tip: otherTip },
+    ]);
   });
 
   it("mirrors nothing when every branch is already upstream", () => {
-    expect(selectUnpushedBranches("0 main\n0 feat/done")).toEqual([]);
+    expect(selectUnpushedBranches([line(0, "main"), line(0, "feat/done")].join("\n"))).toEqual([]);
   });
 
-  it("ignores blank and malformed lines", () => {
-    expect(selectUnpushedBranches("\n2 feat/keep\n\ngarbage\n")).toEqual(["feat/keep"]);
+  it("ignores blank and malformed lines, and a line with no tip", () => {
+    expect(selectUnpushedBranches(`\n${line(2, "feat/keep")}\n\ngarbage\n2 feat/no-tip\n`)).toEqual([
+      { branch: "feat/keep", tip: newTip },
+    ]);
   });
 });
 

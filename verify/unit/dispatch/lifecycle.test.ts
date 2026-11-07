@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { Outcome, World } from "#support/lifecycle-world.ts";
 
-import { NEEDS_HUMAN_LABEL } from "#src/gatekeeper/review-launch.ts";
+import { needsHumanLabel } from "#src/gatekeeper/review-launch.ts";
 import {
   aHumanAbortsTheRun,
   aHumanActsOn,
@@ -84,7 +84,7 @@ function isHoldingItsBead(world: Readonly<World>, slot: string, mode: "detached"
 
 function isGatekeeperReviewing(world: Readonly<World>, index: number): boolean {
   const pr = prAt(world, index);
-  if (pr?.state !== "OPEN" || pr.labels.includes(NEEDS_HUMAN_LABEL)) {
+  if (pr?.state !== "OPEN" || pr.labels.includes(needsHumanLabel)) {
     return false;
   }
   const view = beadView(world, pr.bead);
@@ -98,6 +98,11 @@ function sessionBead(world: Readonly<World>, slot: string): string {
 function resolveTheParkOn(world: World, bead: string): void {
   const park = world.bd.gatesBlocking(bead).find((gate) => gate.status === "open" && gate.awaitType === "human");
   world.bd.run(["gate", "resolve", park?.id ?? "", "--reason", "unparked", "--actor", "someone"]);
+}
+
+function closeUnmerged(world: World, prNumber: number): void {
+  const pr = world.github.prs.find((candidate) => candidate.number === prNumber);
+  if (pr !== undefined) pr.state = "CLOSED";
 }
 
 function replayInOrder(world: World, steps: Array<() => void>): void {
@@ -191,14 +196,10 @@ const detachedRunActions = [
 ];
 
 const sessionActions = [
-  // Only a bead with no started_at, since a claim bd kept it through pairs the session with the earlier run's receipt (the open finding below)
   fc.tuple(slot, beadIndex).map(([name, index]) =>
     action(
       `AnAttendedSessionClaims(${name}, ${String(index)})`,
-      (world) =>
-        !world.runs.has(name) &&
-        world.bd.issues.get(beadAt(world, index))?.startedAt === undefined &&
-        isReady(beadView(world, beadAt(world, index))),
+      (world) => !world.runs.has(name) && isReady(beadView(world, beadAt(world, index))),
       (world) => {
         sessionClaims(world, name, beadAt(world, index));
       },
@@ -310,7 +311,7 @@ const outsideActions = [
         const pr = prAt(world, index);
         if (pr === undefined) return;
         if (isMerge) pr.state = "MERGED";
-        else pr.labels.push(NEEDS_HUMAN_LABEL);
+        else pr.labels.push(needsHumanLabel);
       },
     ),
   ),
@@ -424,44 +425,73 @@ describe("the real dispatch code across lifecycle sequences", () => {
     expect(beadView(world, bead).openPrGates).toEqual(["1"]);
   });
 
-  // Open finding: a claim released by update keeps started_at, so a later attended claim is dated by the earlier run
-  it("still leaves an attended session's PR ungated when its bead's last claim was released, not unclaimed", () => {
+  it("keeps an attended session's PR gated when its bead's last claim delivered a PR that closed unmerged", () => {
     const world = freshWorld(2);
     worlds.push(world);
     const bead = world.beads[1] ?? "";
-    const pr = world.github.prs;
-    const replay = () => {
-      replayInOrder(world, [
-        () => {
-          crank(world, false);
-        },
-        () => {
-          endRun(world, "kiln-2", "delivered");
-        },
-        () => {
-          crank(world, false);
-        },
-        () => {
-          const delivered = pr.find((candidate) => candidate.bead === bead);
-          if (delivered !== undefined) delivered.state = "CLOSED";
-        },
-        () => {
-          crank(world, false);
-        },
-        () => {
-          resolveTheParkOn(world, bead);
-        },
-        () => {
-          sessionClaims(world, "kiln-2", bead);
-          sessionOpensItsPr(world, "kiln-2");
-          sessionEnds(world, "kiln-2", false);
-        },
-        () => {
-          crank(world, false);
-        },
-      ]);
-    };
-    expect(replay).toThrow(`PR #2 of ${bead} is open ungated`);
+    replayInOrder(world, [
+      () => {
+        crank(world, false);
+      },
+      () => {
+        endRun(world, "kiln-2", "delivered");
+      },
+      () => {
+        crank(world, false);
+      },
+      () => {
+        closeUnmerged(world, 1);
+      },
+      () => {
+        crank(world, false);
+      },
+      () => {
+        resolveTheParkOn(world, bead);
+      },
+      () => {
+        sessionClaims(world, "kiln-2", bead);
+        sessionOpensItsPr(world, "kiln-2");
+        sessionEnds(world, "kiln-2", false);
+      },
+      () => {
+        crank(world, false);
+      },
+    ]);
+    expect(beadView(world, bead).openPrGates).toEqual(["2"]);
+  });
+
+  it("keeps a second attended session's PR gated when the first one's anchored PR closed unmerged", () => {
+    const world = freshWorld(1);
+    worlds.push(world);
+    const bead = world.beads[0] ?? "";
+    replayInOrder(world, [
+      () => {
+        sessionClaims(world, "kiln-1", bead);
+        sessionOpensItsPr(world, "kiln-1");
+        sessionEnds(world, "kiln-1", true);
+      },
+      () => {
+        crank(world, false);
+      },
+      () => {
+        closeUnmerged(world, 1);
+      },
+      () => {
+        crank(world, false);
+      },
+      () => {
+        resolveTheParkOn(world, bead);
+      },
+      () => {
+        sessionClaims(world, "kiln-1", bead);
+        sessionOpensItsPr(world, "kiln-1");
+        sessionEnds(world, "kiln-1", false);
+      },
+      () => {
+        crank(world, false);
+      },
+    ]);
+    expect(beadView(world, bead).openPrGates).toEqual(["2"]);
   });
 
   it("reaches every case the invariants guard", () => {

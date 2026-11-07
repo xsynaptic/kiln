@@ -8,9 +8,9 @@ import type { RunReceipt } from "#src/run/receipts.ts";
 
 import { pendingRunOutcome } from "#src/dispatch/reconcile.ts";
 
-const LAUNCHED_AT = "2026-08-17T19:20:00.000Z";
-const NOW_MS = Date.parse("2026-08-17T19:46:20.716Z");
-const REPO_ROOT = "/repo";
+const launchedAt = "2026-08-17T19:20:00.000Z";
+const nowMs = Date.parse("2026-08-17T19:46:20.716Z");
+const fixtureRoot = "/repo";
 
 function delivered(startedAt = "2026-08-17T19:20:30.000Z"): RunReceipt {
   return {
@@ -47,7 +47,7 @@ describe("pendingRunOutcome (dead-run boundary)", () => {
   it("takes the receipt the snapshot already carries", () => {
     store([]);
     const receipt = delivered();
-    expect(pendingRunOutcome({ receipts: [receipt], repoRoot: REPO_ROOT }, "bd-7", LAUNCHED_AT, NOW_MS)).toEqual({
+    expect(pendingRunOutcome({ receipts: [receipt], repoRoot: fixtureRoot }, "bd-7", launchedAt, nowMs)).toEqual({
       kind: "receipt",
       receipt,
     });
@@ -55,8 +55,8 @@ describe("pendingRunOutcome (dead-run boundary)", () => {
 
   it("leaves a run inside the grace window alone, without reading the file", () => {
     store([delivered()]);
-    const justLaunched = new Date(NOW_MS - 2 * 60_000).toISOString();
-    expect(pendingRunOutcome({ receipts: [], repoRoot: REPO_ROOT }, "bd-7", justLaunched, NOW_MS)).toEqual({
+    const justLaunched = new Date(nowMs - 2 * 60_000).toISOString();
+    expect(pendingRunOutcome({ receipts: [], repoRoot: fixtureRoot }, "bd-7", justLaunched, nowMs)).toEqual({
       ageMinutes: 2,
       kind: "starting",
     });
@@ -64,7 +64,7 @@ describe("pendingRunOutcome (dead-run boundary)", () => {
 
   it("finds a receipt written after the crank took its snapshot", () => {
     store([delivered()]);
-    expect(pendingRunOutcome({ receipts: [], repoRoot: REPO_ROOT }, "bd-7", LAUNCHED_AT, NOW_MS)).toEqual({
+    expect(pendingRunOutcome({ receipts: [], repoRoot: fixtureRoot }, "bd-7", launchedAt, nowMs)).toEqual({
       kind: "receipt",
       receipt: delivered(),
     });
@@ -72,14 +72,14 @@ describe("pendingRunOutcome (dead-run boundary)", () => {
 
   it("still calls a run dead when the file has nothing either", () => {
     store([]);
-    expect(pendingRunOutcome({ receipts: [], repoRoot: REPO_ROOT }, "bd-7", LAUNCHED_AT, NOW_MS)).toEqual({
+    expect(pendingRunOutcome({ receipts: [], repoRoot: fixtureRoot }, "bd-7", launchedAt, nowMs)).toEqual({
       kind: "dead",
     });
   });
 
   it("does not count a receipt from an earlier attempt", () => {
     store([delivered("2026-08-17T18:00:00.000Z")]);
-    expect(pendingRunOutcome({ receipts: [], repoRoot: REPO_ROOT }, "bd-7", LAUNCHED_AT, NOW_MS)).toEqual({
+    expect(pendingRunOutcome({ receipts: [], repoRoot: fixtureRoot }, "bd-7", launchedAt, nowMs)).toEqual({
       kind: "dead",
     });
   });

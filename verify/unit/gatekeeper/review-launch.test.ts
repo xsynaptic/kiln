@@ -7,21 +7,24 @@ import {
   attemptsAtHead,
   decideReview,
   escalationDoubt,
-  NEEDS_HUMAN_LABEL,
+  needsHumanLabel,
   reviewLaunchArgs,
 } from "#src/gatekeeper/review-launch.ts";
 
-const GATEKEEPER = "sample-gatekeeper";
-const SHA = "4c0857af79b6eff47e4c9412ff8d3ca58c094a91";
+const gatekeeperLogin = "sample-gatekeeper";
+const reviewedSha = "4c0857af79b6eff47e4c9412ff8d3ca58c094a91";
 
-function attempt(sha = SHA, launchTag = "kiln-1 2026-07-21T09:00:00.000Z"): { authorLogin: string; body: string } {
-  return { authorLogin: GATEKEEPER, body: attemptComment(sha, launchTag) };
+function attempt(
+  sha = reviewedSha,
+  launchTag = "kiln-1 2026-07-21T09:00:00.000Z",
+): { authorLogin: string; body: string } {
+  return { authorLogin: gatekeeperLogin, body: attemptComment(sha, launchTag) };
 }
 
 function candidate(overrides: Partial<ReviewCandidate> = {}): ReviewCandidate {
   return {
     comments: [],
-    headSha: SHA,
+    headSha: reviewedSha,
     isDraft: false,
     labels: [],
     number: 106,
@@ -31,7 +34,7 @@ function candidate(overrides: Partial<ReviewCandidate> = {}): ReviewCandidate {
 }
 
 function escalated(comments: ReviewCandidate["comments"]): ReviewCandidate {
-  return candidate({ comments, labels: ["agent", NEEDS_HUMAN_LABEL] });
+  return candidate({ comments, labels: ["agent", needsHumanLabel] });
 }
 
 function marker(overrides: Partial<ReviewMarker> = {}): ReviewMarker {
@@ -52,41 +55,46 @@ function launched(overrides: Partial<ReviewProgress> = {}): ReviewProgress {
 
 describe("attemptsAtHead", () => {
   it("counts the gatekeeper's attempt stamps at this head", () => {
-    const stamped = candidate({ comments: [attempt(), attempt(SHA, "kiln-2 2026-07-21T10:00:00.000Z")] });
-    expect(attemptsAtHead(stamped, GATEKEEPER)).toBe(2);
-    expect(attemptsAtHead(candidate(), GATEKEEPER)).toBe(0);
+    const stamped = candidate({ comments: [attempt(), attempt(reviewedSha, "kiln-2 2026-07-21T10:00:00.000Z")] });
+    expect(attemptsAtHead(stamped, gatekeeperLogin)).toBe(2);
+    expect(attemptsAtHead(candidate(), gatekeeperLogin)).toBe(0);
   });
 
   it("counts one launch however many times its stamp was posted", () => {
     const stamped = candidate({ comments: [attempt(), attempt()] });
-    expect(attemptsAtHead(stamped, GATEKEEPER)).toBe(1);
+    expect(attemptsAtHead(stamped, gatekeeperLogin)).toBe(1);
   });
 
   it("counts an untagged stamp", () => {
-    const stamped = candidate({ comments: [{ authorLogin: GATEKEEPER, body: `gatekeeper attempt at head ${SHA}` }] });
-    expect(attemptsAtHead(stamped, GATEKEEPER)).toBe(1);
+    const stamped = candidate({
+      comments: [{ authorLogin: gatekeeperLogin, body: `gatekeeper attempt at head ${reviewedSha}` }],
+    });
+    expect(attemptsAtHead(stamped, gatekeeperLogin)).toBe(1);
   });
 
   it("ignores stamps at another head and stamp-shaped text from another author", () => {
-    const comments = [attempt("aaaa1111"), { authorLogin: "sample-agent", body: attemptComment(SHA, "kiln-1 x") }];
-    expect(attemptsAtHead(candidate({ comments }), GATEKEEPER)).toBe(0);
+    const comments = [
+      attempt("aaaa1111"),
+      { authorLogin: "sample-agent", body: attemptComment(reviewedSha, "kiln-1 x") },
+    ];
+    expect(attemptsAtHead(candidate({ comments }), gatekeeperLogin)).toBe(0);
   });
 });
 
 describe("decideReview", () => {
   it("launches a fresh open PR with no marker", () => {
-    expect(decideReview(candidate(), GATEKEEPER, progress())).toStrictEqual({
+    expect(decideReview(candidate(), gatekeeperLogin, progress())).toStrictEqual({
       action: "launch",
       attempts: 1,
     });
   });
 
   it("skips a draft and a non-open PR", () => {
-    expect(decideReview(candidate({ isDraft: true }), GATEKEEPER, progress())).toStrictEqual({
+    expect(decideReview(candidate({ isDraft: true }), gatekeeperLogin, progress())).toStrictEqual({
       action: "skip",
       reason: "not-open",
     });
-    expect(decideReview(candidate({ state: "MERGED" }), GATEKEEPER, progress())).toStrictEqual({
+    expect(decideReview(candidate({ state: "MERGED" }), gatekeeperLogin, progress())).toStrictEqual({
       action: "skip",
       reason: "not-open",
     });
@@ -94,9 +102,9 @@ describe("decideReview", () => {
 
   it("skips when the gatekeeper already commented on this head", () => {
     const reviewed = candidate({
-      comments: [{ authorLogin: GATEKEEPER, body: `reviewed head \`${SHA}\`` }],
+      comments: [{ authorLogin: gatekeeperLogin, body: `reviewed head \`${reviewedSha}\`` }],
     });
-    expect(decideReview(reviewed, GATEKEEPER, progress())).toStrictEqual({
+    expect(decideReview(reviewed, gatekeeperLogin, progress())).toStrictEqual({
       action: "skip",
       reason: "reviewed",
     });
@@ -104,14 +112,14 @@ describe("decideReview", () => {
 
   it("never reads an attempt stamp as the review itself", () => {
     const stamped = candidate({ comments: [attempt()] });
-    expect(decideReview(stamped, GATEKEEPER, progress())).toStrictEqual({ action: "launch", attempts: 2 });
+    expect(decideReview(stamped, gatekeeperLogin, progress())).toStrictEqual({ action: "launch", attempts: 2 });
   });
 
   it("ignores a head-SHA mention from any other author", () => {
     const authored = candidate({
-      comments: [{ authorLogin: "sample-agent", body: `pushed ${SHA}` }],
+      comments: [{ authorLogin: "sample-agent", body: `pushed ${reviewedSha}` }],
     });
-    expect(decideReview(authored, GATEKEEPER, progress())).toStrictEqual({
+    expect(decideReview(authored, gatekeeperLogin, progress())).toStrictEqual({
       action: "launch",
       attempts: 1,
     });
@@ -119,14 +127,14 @@ describe("decideReview", () => {
 
   it("ignores a gatekeeper comment about an older head", () => {
     const stale = candidate({
-      comments: [{ authorLogin: GATEKEEPER, body: "reviewed head `aaaa1111`" }],
+      comments: [{ authorLogin: gatekeeperLogin, body: "reviewed head `aaaa1111`" }],
     });
-    expect(decideReview(stale, GATEKEEPER, progress())).toStrictEqual({ action: "launch", attempts: 1 });
+    expect(decideReview(stale, gatekeeperLogin, progress())).toStrictEqual({ action: "launch", attempts: 1 });
   });
 
   it("holds while the launched run is still in flight", () => {
     const stamped = candidate({ comments: [attempt()] });
-    expect(decideReview(stamped, GATEKEEPER, launched({ isHolding: true }))).toStrictEqual({
+    expect(decideReview(stamped, gatekeeperLogin, launched({ isHolding: true }))).toStrictEqual({
       action: "skip",
       reason: "in-flight",
     });
@@ -134,23 +142,23 @@ describe("decideReview", () => {
 
   it("relaunches after a run that ended without commenting, counting the attempt", () => {
     const stamped = candidate({ comments: [attempt()] });
-    expect(decideReview(stamped, GATEKEEPER, launched({ hasReceipt: true, isHolding: true }))).toStrictEqual({
+    expect(decideReview(stamped, gatekeeperLogin, launched({ hasReceipt: true, isHolding: true }))).toStrictEqual({
       action: "launch",
       attempts: 2,
     });
-    expect(decideReview(stamped, GATEKEEPER, launched())).toStrictEqual({
+    expect(decideReview(stamped, gatekeeperLogin, launched())).toStrictEqual({
       action: "launch",
       attempts: 2,
     });
   });
 
   it("stops after the attempt cap and waits for a human, marker or no marker", () => {
-    const exhausted = candidate({ comments: [attempt(), attempt(SHA, "kiln-2 2026-07-21T10:00:00.000Z")] });
-    expect(decideReview(exhausted, GATEKEEPER, launched({ hasReceipt: true }))).toStrictEqual({
+    const exhausted = candidate({ comments: [attempt(), attempt(reviewedSha, "kiln-2 2026-07-21T10:00:00.000Z")] });
+    expect(decideReview(exhausted, gatekeeperLogin, launched({ hasReceipt: true }))).toStrictEqual({
       action: "skip",
       reason: "attempts-exhausted",
     });
-    expect(decideReview(exhausted, GATEKEEPER, progress())).toStrictEqual({
+    expect(decideReview(exhausted, gatekeeperLogin, progress())).toStrictEqual({
       action: "skip",
       reason: "attempts-exhausted",
     });
@@ -160,7 +168,7 @@ describe("decideReview", () => {
     const repushed = candidate({
       comments: [attempt("aaaa1111"), attempt("aaaa1111", "kiln-2 2026-07-21T10:00:00.000Z")],
     });
-    expect(decideReview(repushed, GATEKEEPER, progress())).toStrictEqual({
+    expect(decideReview(repushed, gatekeeperLogin, progress())).toStrictEqual({
       action: "launch",
       attempts: 1,
     });
@@ -169,35 +177,35 @@ describe("decideReview", () => {
 
 describe("escalationDoubt", () => {
   it("hands back the gatekeeper's doubt verbatim, since a human reads it in the park comment", () => {
-    const body = `Escalating at \`${SHA}\`. Gate green.\nThe migration drops a column a caller still reads.`;
-    expect(escalationDoubt(escalated([{ authorLogin: GATEKEEPER, body }]), GATEKEEPER)).toBe(body);
+    const body = `Escalating at \`${reviewedSha}\`. Gate green.\nThe migration drops a column a caller still reads.`;
+    expect(escalationDoubt(escalated([{ authorLogin: gatekeeperLogin, body }]), gatekeeperLogin)).toBe(body);
   });
 
   it("takes the latest gatekeeper comment, skipping stamps and everyone else", () => {
     const doubt = escalationDoubt(
       escalated([
-        { authorLogin: GATEKEEPER, body: "reviewed head `aaaa1111`, merged" },
+        { authorLogin: gatekeeperLogin, body: "reviewed head `aaaa1111`, merged" },
         { authorLogin: "sample-agent", body: "pushed a fix" },
-        { authorLogin: GATEKEEPER, body: "  the new assertion cannot fail  " },
+        { authorLogin: gatekeeperLogin, body: "  the new assertion cannot fail  " },
         attempt(),
       ]),
-      GATEKEEPER,
+      gatekeeperLogin,
     );
     expect(doubt).toBe("the new assertion cannot fail");
   });
 
   it("names the label when a human escalated by hand, leaving no comment", () => {
-    expect(escalationDoubt(escalated([]), GATEKEEPER)).toBe(`labeled ${NEEDS_HUMAN_LABEL} by hand`);
-    expect(escalationDoubt(escalated([{ authorLogin: "operator", body: "look at this" }]), GATEKEEPER)).toBe(
-      `labeled ${NEEDS_HUMAN_LABEL} by hand`,
+    expect(escalationDoubt(escalated([]), gatekeeperLogin)).toBe(`labeled ${needsHumanLabel} by hand`);
+    expect(escalationDoubt(escalated([{ authorLogin: "operator", body: "look at this" }]), gatekeeperLogin)).toBe(
+      `labeled ${needsHumanLabel} by hand`,
     );
   });
 
   it("is silent without the label, whatever the gatekeeper said", () => {
     const doubted = candidate({
-      comments: [{ authorLogin: GATEKEEPER, body: `escalating \`${SHA}\`` }],
+      comments: [{ authorLogin: gatekeeperLogin, body: `escalating \`${reviewedSha}\`` }],
     });
-    expect(escalationDoubt(doubted, GATEKEEPER)).toBeUndefined();
+    expect(escalationDoubt(doubted, gatekeeperLogin)).toBeUndefined();
   });
 });
 

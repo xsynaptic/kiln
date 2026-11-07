@@ -5,7 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import { describe, expect, it } from "vitest";
 
-const HOOK = path.join(import.meta.dirname, "../../../src/run/wrapup-hook.mjs");
+const hookPath = path.join(import.meta.dirname, "../../../src/run/wrapup-hook.mjs");
 
 interface HookRun {
   latched: boolean;
@@ -38,7 +38,7 @@ function runHook(transcript: string, workDir?: string): HookRun {
     transcript_path: transcriptPath,
   };
   const markerPath = path.join(dir, "blind-nudged");
-  const result = spawnSync(process.execPath, [HOOK, markerPath], {
+  const result = spawnSync(process.execPath, [hookPath, markerPath], {
     encoding: "utf8",
     env: { ...process.env },
     input: JSON.stringify(payload),
@@ -92,7 +92,7 @@ describe("the wrap-up nudge hook", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "wrapup-"));
     const transcriptPath = path.join(dir, "session.jsonl");
     writeFileSync(transcriptPath, assistant(420_000));
-    const result = spawnSync(process.execPath, [HOOK], {
+    const result = spawnSync(process.execPath, [hookPath], {
       encoding: "utf8",
       env: { ...process.env },
       input: JSON.stringify({ agent_type: null, transcript_path: transcriptPath }),
