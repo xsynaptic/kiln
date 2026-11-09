@@ -1,5 +1,5 @@
 export interface ModelClaims {
-  findings: Array<string>;
+  findings: Array<{ isTemporal?: boolean; rule: string }>;
   holds: Array<string>;
   mutants: Array<{ mutant: string; replace: string; rule: string }>;
   properties: Array<string>;

@@ -88,27 +88,30 @@ function getRuleKeyword({ properties }: ModelClaims, rule: string) {
   return properties.includes(rule) ? "PROPERTY" : "INVARIANT";
 }
 
+function getRuleLines(keyword: string, rules: Array<string>) {
+  return rules.length > 0 ? [`${keyword} ${rules.join(" ")}`] : [];
+}
+
 // TLC prints a block every `-coverage` interval, so an action reached late reads 0 in the earlier ones
-function neverEnabledActions(output: string): Array<string> {
+function findDeadActions(output: string) {
   const finalCoverage = output.slice(output.lastIndexOf(coverageHeader));
   const deadActions: Array<string> = [];
+  let isInitCovered = false;
+
   for (const [, action, total] of finalCoverage.matchAll(coverageRowPattern)) {
-    if (action !== undefined && action !== "Init" && total === "0") {
-      deadActions.push(action);
-    }
+    if (action === "Init") isInitCovered = true;
+    if (action === undefined || action === "Init" || total !== "0") continue;
+    deadActions.push(action);
   }
-  return deadActions;
+
+  return { deadActions, isInitCovered };
 }
 
 function checkHolds(runDirectory: string, model: string, modelClaims: ModelClaims): CheckResult {
   const { holds, properties } = modelClaims;
   const rules = [...holds, ...properties];
   const { output, verdict } = runTlc(runDirectory, {
-    cfg: [
-      "SPECIFICATION Spec",
-      `INVARIANT ${holds.join(" ")}`,
-      ...(properties.length > 0 ? [`PROPERTY ${properties.join(" ")}`] : []),
-    ],
+    cfg: ["SPECIFICATION Spec", ...getRuleLines("INVARIANT", holds), ...getRuleLines("PROPERTY", properties)],
     flags: ["-coverage", "1"],
     label: "holds",
     model,
@@ -124,7 +127,17 @@ function checkHolds(runDirectory: string, model: string, modelClaims: ModelClaim
     };
   }
 
-  const deadActions = neverEnabledActions(output);
+  const { deadActions, isInitCovered } = findDeadActions(output);
+
+  // Unparsed coverage would otherwise read as every action enabled
+  if (!isInitCovered) {
+    return {
+      isPassed: false,
+      line: `${model}: no coverage rows read from TLC's output`,
+      output,
+    };
+  }
+
   if (deadActions.length > 0) {
     return {
       isPassed: false,
@@ -133,10 +146,11 @@ function checkHolds(runDirectory: string, model: string, modelClaims: ModelClaim
   }
 
   const states = finalCountPattern.exec(output)?.[1] ?? "?";
+  const holding = rules.length > 0 ? `${rules.join(", ")} hold` : "no rule holds yet";
 
   return {
     isPassed: true,
-    line: `${model}: ${rules.join(", ")} hold over ${states} states, every action enabled`,
+    line: `${model}: ${holding} over ${states} states, every action enabled`,
   };
 }
 
@@ -169,9 +183,13 @@ function checkMutant(
   return { isPassed: true, line: `${model}: mutant ${mutant} breaks ${rule}` };
 }
 
-function checkFinding(runDirectory: string, model: string, rule: string): CheckResult {
+function checkFinding(
+  runDirectory: string,
+  model: string,
+  { isTemporal = false, rule }: ModelClaims["findings"][number],
+): CheckResult {
   const { output, verdict } = runTlc(runDirectory, {
-    cfg: ["SPECIFICATION Spec", `INVARIANT ${rule}`, "CHECK_DEADLOCK FALSE"],
+    cfg: ["SPECIFICATION Spec", `${isTemporal ? "PROPERTY" : "INVARIANT"} ${rule}`, "CHECK_DEADLOCK FALSE"],
     label: `finding-${rule}`,
     model,
     module: "spec",
@@ -230,8 +248,8 @@ function* checkModel(runDirectory: string, model: string, modelClaims: ModelClai
     });
   }
 
-  for (const rule of modelClaims.findings) {
-    yield checkFinding(runDirectory, model, rule);
+  for (const finding of modelClaims.findings) {
+    yield checkFinding(runDirectory, model, finding);
   }
 
   if (existsSync(path.join(modelsDirectory, model, "witness.tla"))) {

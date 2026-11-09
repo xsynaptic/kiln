@@ -11,7 +11,7 @@
 \* Models src/gatekeeper/pr-views.ts
 \* Models contracts/detached.md
 \* Models contracts/attended.md
-\* Sync commit none; confirmed against the uncommitted tree of 2026-11-07
+\* Sync commit d41a658
 EXTENDS Naturals
 
 \* Bounds the search; a bead past this many launches stops being dispatched
